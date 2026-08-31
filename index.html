@@ -96,6 +96,10 @@
         <div><strong id="progress-title">PDF를 읽고 있습니다.</strong><span id="progress-detail">잠시만 기다려 주세요.</span></div>
       </div>
       <p id="analysis-error" class="analysis-message error" role="alert" hidden></p>
+      <details id="analysis-error-detail" class="error-detail" hidden>
+        <summary>오류 상세 정보</summary>
+        <pre id="analysis-error-debug"></pre>
+      </details>
       <p id="analysis-warning" class="analysis-message warning" role="status" hidden></p>
     </section>
 
@@ -164,6 +168,19 @@
           <p class="preview-note">미리보기는 작성 편의를 위한 화면이며, 최종 사용 전 원본 MSDS 및 관련 기준을 확인해야 합니다.</p>
         </aside>
       </div>
+
+      <section class="diagnostics-section" aria-labelledby="diagnostics-title">
+        <div class="diagnostics-heading">
+          <div><span class="development-label">개발 확인용</span><h3 id="diagnostics-title">PDF 텍스트 추출 진단</h3></div>
+          <span id="diagnostics-scan-status" class="diagnostic-status"></span>
+        </div>
+        <dl class="diagnostic-summary">
+          <div><dt>전체 페이지 수</dt><dd id="diagnostics-page-count">-</dd></div>
+          <div><dt>전체 텍스트 길이</dt><dd id="diagnostics-total-length">-</dd></div>
+          <div><dt>2. 유해성·위험성 탐지</dt><dd id="diagnostics-section-two">-</dd></div>
+        </dl>
+        <div class="page-lengths"><strong>페이지별 추출 텍스트 길이</strong><ul id="diagnostics-page-lengths"></ul></div>
+      </section>
 
       <div class="raw-text-section">
         <button id="raw-text-toggle" class="secondary-button" type="button" aria-expanded="false" aria-controls="raw-text-panel">

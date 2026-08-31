@@ -19,6 +19,8 @@ const analysisProgress = document.querySelector('#analysis-progress');
 const progressTitle = document.querySelector('#progress-title');
 const progressDetail = document.querySelector('#progress-detail');
 const analysisError = document.querySelector('#analysis-error');
+const analysisErrorDetail = document.querySelector('#analysis-error-detail');
+const analysisErrorDebug = document.querySelector('#analysis-error-debug');
 const analysisWarning = document.querySelector('#analysis-warning');
 const results = document.querySelector('#results');
 const selectedSizeText = document.querySelector('#selected-size-text');
@@ -26,6 +28,11 @@ const rawTextToggle = document.querySelector('#raw-text-toggle');
 const rawTextPanel = document.querySelector('#raw-text-panel');
 const rawTextContent = document.querySelector('#raw-text-content');
 const rawTextSummary = document.querySelector('#raw-text-summary');
+const diagnosticsPageCount = document.querySelector('#diagnostics-page-count');
+const diagnosticsTotalLength = document.querySelector('#diagnostics-total-length');
+const diagnosticsSectionTwo = document.querySelector('#diagnostics-section-two');
+const diagnosticsPageLengths = document.querySelector('#diagnostics-page-lengths');
+const diagnosticsScanStatus = document.querySelector('#diagnostics-scan-status');
 
 let selectedFile = null;
 let isAnalyzing = false;
@@ -47,6 +54,8 @@ function showFileError(message) {
 
 function clearAnalysisMessages() {
   analysisError.hidden = true;
+  analysisErrorDetail.hidden = true;
+  analysisErrorDetail.open = false;
   analysisWarning.hidden = true;
 }
 
@@ -155,10 +164,15 @@ async function extractPdfText(file) {
   progressTitle.textContent = `총 ${pageCount}페이지를 확인했습니다.`;
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
     progressDetail.textContent = `${pageNumber} / ${pageCount} 페이지의 텍스트를 추출하는 중입니다.`;
-    const page = await pdf.getPage(pageNumber);
-    const textContent = await page.getTextContent({ includeMarkedContent: false });
-    pages.push(buildPageText(textContent.items));
-    page.cleanup();
+    try {
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent({ includeMarkedContent: false });
+      pages.push(buildPageText(textContent.items));
+      page.cleanup();
+    } catch (error) {
+      error.pageNumber = pageNumber;
+      throw error;
+    }
   }
   await pdf.destroy();
   return { pageCount, pages };
@@ -282,7 +296,42 @@ function getAnalysisErrorMessage(error) {
   if (name === 'InvalidPDFException') return '올바르지 않거나 손상된 PDF 파일입니다. 원본 파일을 확인해 주세요.';
   if (name === 'MissingPDFException') return 'PDF 파일을 불러오지 못했습니다. 파일을 다시 선택해 주세요.';
   if (name === 'UnexpectedResponseException') return 'PDF를 읽는 중 예상하지 못한 응답이 발생했습니다.';
-  return 'PDF 분석에 실패했습니다. 파일이 손상되지 않았는지 확인한 뒤 다시 시도해 주세요.';
+  if (name === 'FormatError') return 'PDF 내부 형식을 해석하지 못했습니다. 다른 PDF 뷰어에서 파일이 정상적으로 열리는지 확인해 주세요.';
+  if (name === 'AbortException') return 'PDF 분석 작업이 중단되었습니다. 파일을 다시 선택한 뒤 재시도해 주세요.';
+  if (error?.pageNumber) return `${error.pageNumber}페이지의 텍스트를 읽는 중 오류가 발생했습니다.`;
+  return 'PDF 분석에 실패했습니다. 네트워크 연결과 파일 상태를 확인한 뒤 다시 시도해 주세요.';
+}
+
+function buildDiagnostics(extracted) {
+  const pageLengths = extracted.pages.map((page) => page.replace(/\s/g, '').length);
+  const totalLength = pageLengths.reduce((sum, length) => sum + length, 0);
+  const allLines = extracted.pages.join('\n').split(/\r?\n/).map(cleanLine).filter(Boolean);
+  const sectionTwoDetected = allLines.some((line) => isSectionHeading(line, 2));
+  const isLikelyScanned = totalLength < 200 || totalLength / extracted.pageCount < 40;
+  return { pageCount: extracted.pageCount, pageLengths, totalLength, sectionTwoDetected, isLikelyScanned };
+}
+
+function showDiagnostics(diagnostics) {
+  diagnosticsPageCount.textContent = `${diagnostics.pageCount}페이지`;
+  diagnosticsTotalLength.textContent = `${diagnostics.totalLength.toLocaleString('ko-KR')}자`;
+  diagnosticsSectionTwo.textContent = diagnostics.sectionTwoDetected ? '탐지됨' : '탐지되지 않음';
+  diagnosticsPageLengths.replaceChildren(...diagnostics.pageLengths.map((length, index) => {
+    const item = document.createElement('li');
+    item.textContent = `${index + 1}페이지: ${length.toLocaleString('ko-KR')}자`;
+    return item;
+  }));
+  diagnosticsScanStatus.textContent = diagnostics.isLikelyScanned ? '스캔형 PDF 의심' : '텍스트 추출 가능';
+  diagnosticsScanStatus.className = `diagnostic-status ${diagnostics.isLikelyScanned ? 'warning' : 'normal'}`;
+}
+
+function logDiagnostics(file, diagnostics) {
+  console.groupCollapsed(`[HSSO PDF 분석] ${file.name}`);
+  console.info('전체 페이지 수:', diagnostics.pageCount);
+  console.table(diagnostics.pageLengths.map((length, index) => ({ 페이지: index + 1, '추출 텍스트 길이': length })));
+  console.info('전체 추출 텍스트 길이:', diagnostics.totalLength);
+  console.info('"2. 유해성·위험성" 탐지 여부:', diagnostics.sectionTwoDetected);
+  console.info('스캔형 PDF 의심 여부:', diagnostics.isLikelyScanned);
+  console.groupEnd();
 }
 
 analyzeButton.addEventListener('click', async () => {
@@ -298,17 +347,18 @@ analyzeButton.addEventListener('click', async () => {
   try {
     const extracted = await extractPdfText(selectedFile);
     const rawText = extracted.pages.map((page, index) => `[${index + 1} 페이지]\n${page}`).join('\n\n');
-    const meaningfulLength = extracted.pages.join('').replace(/\s/g, '').length;
-    const isLikelyScanned = meaningfulLength < 200 || meaningfulLength / extracted.pageCount < 40;
+    const diagnostics = buildDiagnostics(extracted);
+    showDiagnostics(diagnostics);
+    logDiagnostics(selectedFile, diagnostics);
     fillAnalysisResult(analyzeMsdsText(extracted.pages));
     rawTextContent.textContent = rawText || '(추출된 텍스트가 없습니다.)';
-    rawTextSummary.textContent = `${extracted.pageCount}페이지 · ${meaningfulLength.toLocaleString('ko-KR')}자`;
+    rawTextSummary.textContent = `${extracted.pageCount}페이지 · ${diagnostics.totalLength.toLocaleString('ko-KR')}자`;
     const selectedSize = document.querySelector('input[name="label-size"]:checked');
     selectedSizeText.textContent = selectedSize.value === 'custom'
       ? `${customWidth.value} × ${customHeight.value} mm`
       : `${selectedSize.value} 선택됨`;
     results.hidden = false;
-    if (isLikelyScanned) {
+    if (diagnostics.isLikelyScanned) {
       analysisWarning.textContent = '텍스트를 충분히 추출하지 못했습니다. 이미지형 또는 스캔형 MSDS일 수 있습니다.';
       analysisWarning.hidden = false;
     }
@@ -317,6 +367,13 @@ analyzeButton.addEventListener('click', async () => {
     console.error('PDF 분석 오류:', error);
     analysisError.textContent = getAnalysisErrorMessage(error);
     analysisError.hidden = false;
+    analysisErrorDebug.textContent = [
+      `오류 유형: ${error?.name || '알 수 없음'}`,
+      error?.pageNumber ? `발생 페이지: ${error.pageNumber}` : '',
+      error?.code !== undefined ? `오류 코드: ${error.code}` : '',
+      `상세 메시지: ${error?.message || '상세 메시지 없음'}`
+    ].filter(Boolean).join('\n');
+    analysisErrorDetail.hidden = false;
   } finally {
     isAnalyzing = false;
     analysisProgress.hidden = true;
