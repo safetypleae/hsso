@@ -275,15 +275,16 @@ function isKnownLabel(line) {
 }
 
 function extractCodedStatements(lines, prefix) {
-  const codePattern = prefix === 'H' ? /^H\d{3}\b/i : /^P\d{3}(?:\+P\d{3})*\b/i;
+  const codePattern = prefix === 'H' ? /\bH\d{3}\b/i : /\bP\d{3}(?:\+P\d{3})*\b/i;
   const results = [];
   for (let index = 0; index < lines.length; index += 1) {
-    if (!codePattern.test(lines[index])) continue;
-    let statement = cleanLine(lines[index]);
+    const codeMatch = lines[index].match(codePattern);
+    if (!codeMatch) continue;
+    let statement = cleanLine(lines[index].slice(codeMatch.index));
     for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
       const next = cleanLine(lines[nextIndex]);
       if (!next || isPdfNoiseLine(next)) continue;
-      if (/^[HP]\d{3}\b/i.test(next) || getPrecautionCategory(next) || isKnownLabel(next) || isSectionHeading(next, 3)) break;
+      if (/^[HP]\d{3}\b/i.test(next) || /^[가-하]\.\s*/.test(next) || getPrecautionCategory(next) || isKnownLabel(next) || isSectionHeading(next, 3)) break;
       statement += ` ${next}`;
     }
     statement = statement.replace(/\s+/g, ' ').trim();
@@ -344,7 +345,7 @@ function collectCategorizedPrecautions(lines, repeatedNoise = new Set()) {
       currentStatement = line;
       return;
     }
-    if (currentStatement && !/^H\d{3}\b/i.test(line) && !isKnownLabel(line) && !isSectionHeading(line, 3)) {
+    if (currentStatement && !/^H\d{3}\b/i.test(line) && !/^[가-하]\.\s*/.test(line) && !isKnownLabel(line) && !isSectionHeading(line, 3)) {
       currentStatement += ` ${line}`;
     } else if (currentStatement) {
       saveStatement();
