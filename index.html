@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="안전·보건관리자를 위한 MSDS 경고표지 제작 도구">
+  <title>MSDS 경고표지 제작 | HSSO</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="logo" href="#" aria-label="HSSO 홈">HSSO<span>.</span></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="main-menu">메뉴</button>
+      <nav id="main-menu" class="main-nav" aria-label="주요 메뉴">
+        <a href="#" data-coming-soon>홈</a>
+        <a href="#maker" class="active" aria-current="page">경고표지 제작</a>
+        <a href="#" data-coming-soon>MSDS 검색</a>
+        <a href="#" data-coming-soon>안전보건 도구</a>
+        <a href="#" data-coming-soon>자료실</a>
+        <a href="#" data-coming-soon>커뮤니티</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="maker">
+    <section class="hero section-shell">
+      <p class="eyebrow">WARNING LABEL MAKER</p>
+      <h1>MSDS 경고표지 제작</h1>
+      <p class="hero-description">MSDS PDF를 업로드하면 경고표지 작성에 필요한 정보를 분석하여 경고표지 제작을 도와드립니다.</p>
+      <div class="safety-notice">
+        <strong>안내</strong>
+        <span>확인되지 않은 정보는 임의로 채우지 않으며, 실제 MSDS 근거 확인이 필요한 항목은 ‘확인 필요’로 표시합니다.</span>
+      </div>
+    </section>
+
+    <section class="setup-section section-shell" aria-labelledby="upload-title">
+      <div class="section-heading">
+        <span class="step-number">01</span>
+        <div>
+          <h2 id="upload-title">MSDS PDF 업로드</h2>
+          <p>분석할 MSDS 원본 PDF 파일을 선택해 주세요.</p>
+        </div>
+      </div>
+
+      <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="MSDS PDF 파일 선택">
+        <input id="file-input" type="file" accept="application/pdf,.pdf" hidden>
+        <div class="upload-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+        </div>
+        <strong>MSDS PDF를 여기에 놓아주세요</strong>
+        <span>또는</span>
+        <span class="file-select-button">파일 선택</span>
+        <small>PDF 형식만 업로드할 수 있습니다.</small>
+      </div>
+
+      <div id="file-info" class="file-info" hidden>
+        <div class="file-badge">PDF</div>
+        <div class="file-details">
+          <strong id="file-name"></strong>
+          <span id="file-size"></span>
+        </div>
+        <button id="remove-file" class="text-button danger" type="button">삭제</button>
+      </div>
+      <p id="file-error" class="error-message" role="alert" hidden></p>
+
+      <div class="divider"></div>
+
+      <div class="section-heading compact">
+        <span class="step-number">02</span>
+        <div>
+          <h2>경고표지 크기 선택</h2>
+          <p>사용할 환경에 맞는 크기 유형을 선택해 주세요.</p>
+        </div>
+      </div>
+
+      <fieldset class="size-options">
+        <legend class="sr-only">경고표지 크기</legend>
+        <label class="size-card"><input type="radio" name="label-size" value="소형"><span><strong>소형</strong><small>작은 용기용</small></span></label>
+        <label class="size-card"><input type="radio" name="label-size" value="중형"><span><strong>중형</strong><small>일반 용기용</small></span></label>
+        <label class="size-card"><input type="radio" name="label-size" value="대형"><span><strong>대형</strong><small>대형 용기용</small></span></label>
+        <label class="size-card"><input type="radio" name="label-size" value="custom"><span><strong>직접 입력</strong><small>원하는 크기</small></span></label>
+      </fieldset>
+
+      <div id="custom-size" class="custom-size" hidden>
+        <label>가로 <span><input id="custom-width" type="number" min="1" inputmode="numeric" placeholder="예: 100"> mm</span></label>
+        <label>세로 <span><input id="custom-height" type="number" min="1" inputmode="numeric" placeholder="예: 150"> mm</span></label>
+      </div>
+      <p class="size-caption">※ 구체적인 규격 수치는 향후 정확한 법적 기준을 검토하여 반영합니다.</p>
+
+      <button id="analyze-button" class="primary-button" type="button" disabled>
+        <span>MSDS 분석하기</span><span aria-hidden="true">→</span>
+      </button>
+    </section>
+
+    <section id="results" class="results-section section-shell" aria-labelledby="results-title" hidden>
+      <div class="results-intro">
+        <div>
+          <p class="eyebrow">ANALYSIS RESULT</p>
+          <h2 id="results-title">MSDS 분석 결과</h2>
+          <p>원본 MSDS와 대조하여 각 항목을 입력하고 상태를 확인해 주세요.</p>
+        </div>
+        <span class="demo-badge">입력 대기</span>
+      </div>
+
+      <div class="result-layout">
+        <div class="form-panel">
+          <div class="panel-title"><h3>표지 정보 입력</h3><span>모든 내용은 직접 확인해 주세요.</span></div>
+
+          <div class="field-group">
+            <div class="field-heading"><label for="product-name">제품명</label><span class="status status-check">확인됨</span></div>
+            <input id="product-name" class="preview-source" data-preview="preview-product" type="text" placeholder="MSDS의 제품명을 입력하세요">
+          </div>
+
+          <div class="field-group">
+            <div class="field-heading"><label for="supplier-info">공급자 정보</label><span class="status status-check">확인됨</span></div>
+            <textarea id="supplier-info" class="preview-source" data-preview="preview-supplier" rows="3" placeholder="회사명, 주소, 긴급 전화번호 등을 입력하세요"></textarea>
+          </div>
+
+          <div class="field-group">
+            <div class="field-heading"><span class="field-label">그림문자</span><span class="status status-needed">확인 필요</span></div>
+            <div class="pictogram-selector">
+              <div class="pictogram-placeholder" aria-hidden="true">◇</div>
+              <div><strong>GHS 그림문자 영역</strong><p>실제 MSDS 분석 결과를 근거로 향후 표시됩니다.</p></div>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <div class="field-heading"><label for="signal-word">신호어</label><span class="status status-needed">확인 필요</span></div>
+            <input id="signal-word" class="preview-source" data-preview="preview-signal" type="text" placeholder="MSDS에 기재된 신호어를 입력하세요">
+          </div>
+
+          <div class="field-group">
+            <div class="field-heading"><label for="hazard-statements">유해·위험문구</label><span class="status status-needed">확인 필요</span></div>
+            <textarea id="hazard-statements" class="preview-source" data-preview="preview-hazard" rows="4" placeholder="MSDS에 기재된 유해·위험문구를 입력하세요"></textarea>
+          </div>
+
+          <div class="field-group">
+            <div class="field-heading"><label for="precaution-statements">예방조치문구</label><span class="status status-needed">확인 필요</span></div>
+            <textarea id="precaution-statements" class="preview-source" data-preview="preview-precaution" rows="5" placeholder="MSDS에 기재된 예방조치문구를 입력하세요"></textarea>
+          </div>
+        </div>
+
+        <aside class="preview-panel" aria-labelledby="preview-title">
+          <div class="panel-title"><h3 id="preview-title">경고표지 미리보기</h3><span id="selected-size-text">크기 선택됨</span></div>
+          <div class="warning-label">
+            <div id="preview-product" class="preview-product empty-value">제품명</div>
+            <div class="preview-pictograms">
+              <div class="ghs-placeholder"><span>GHS</span><small>그림문자</small></div>
+            </div>
+            <div id="preview-signal" class="preview-signal empty-value">신호어</div>
+            <div class="preview-copy">
+              <section><strong>유해·위험문구</strong><p id="preview-hazard" class="empty-value">MSDS에서 확인한 내용을 입력하세요.</p></section>
+              <section><strong>예방조치문구</strong><p id="preview-precaution" class="empty-value">MSDS에서 확인한 내용을 입력하세요.</p></section>
+            </div>
+            <div class="preview-supplier"><strong>공급자 정보</strong><p id="preview-supplier" class="empty-value">MSDS에서 확인한 공급자 정보를 입력하세요.</p></div>
+          </div>
+          <p class="preview-note">미리보기는 작성 편의를 위한 화면이며, 최종 사용 전 원본 MSDS 및 관련 기준을 확인해야 합니다.</p>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <footer><div class="section-shell"><strong>HSSO</strong><span>안전한 현장을 위한 실용적인 업무 도구</span><small>© 2026 HSSO. MVP Preview.</small></div></footer>
+  <script src="script.js"></script>
+</body>
+</html>
