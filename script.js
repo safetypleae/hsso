@@ -273,6 +273,75 @@ function extractCodedStatements(lines, prefix) {
   return results;
 }
 
+function isPdfNoiseLine(line, repeatedNoise = new Set()) {
+  const value = line.trim();
+  return repeatedNoise.has(normalized(value)) || /물질안전보건자료\s*\(?MSDS\)?|산업안전보건법|https?:\/\/|www\.|문서\s*번호|document\s*no\.?|revision|개정\s*(?:번호|일자)|^\s*(?:page\s*)?\d+\s*(?:\/|of)\s*\d+\s*$/i.test(value);
+}
+
+function getPrecautionCategory(line) {
+  const match = line.match(/^(?:[가-하]\.?\s*)?(예방|대응|저장|폐기)(?:\s*[:：-]\s*|\s*$)/);
+  return match ? match[1] : '';
+}
+
+function findRepeatedPageFurniture(pages) {
+  const pageOccurrences = new Map();
+  pages.forEach((page) => {
+    const uniqueLines = new Set(page.split(/\r?\n/).map(cleanLine).filter(Boolean));
+    uniqueLines.forEach((line) => {
+      if (line.length > 120 || /^P\d{3}/i.test(line) || getPrecautionCategory(line)) return;
+      const key = normalized(line);
+      pageOccurrences.set(key, (pageOccurrences.get(key) || 0) + 1);
+    });
+  });
+  return new Set([...pageOccurrences].filter(([, count]) => count >= 2).map(([line]) => line));
+}
+
+function collectCategorizedPrecautions(lines, repeatedNoise = new Set()) {
+  const categories = { 예방: [], 대응: [], 저장: [], 폐기: [] };
+  const uncategorized = [];
+  let currentCategory = '';
+  let currentStatement = '';
+
+  function saveStatement() {
+    if (!currentStatement) return;
+    const target = currentCategory ? categories[currentCategory] : uncategorized;
+    const normalizedStatement = currentStatement.replace(/\s+/g, ' ').trim();
+    if (!target.includes(normalizedStatement)) target.push(normalizedStatement);
+    currentStatement = '';
+  }
+
+  lines.forEach((rawLine) => {
+    const line = cleanLine(rawLine);
+    if (!line || isPdfNoiseLine(line, repeatedNoise)) return;
+    const category = getPrecautionCategory(line);
+    if (category) {
+      saveStatement();
+      currentCategory = category;
+      return;
+    }
+    if (/^P\d{3}(?:\+P\d{3})*\b/i.test(line)) {
+      saveStatement();
+      currentStatement = line;
+      return;
+    }
+    if (currentStatement && !isKnownLabel(line) && !isSectionHeading(line, 3)) {
+      currentStatement += ` ${line}`;
+    } else if (currentStatement) {
+      saveStatement();
+    }
+  });
+  saveStatement();
+  return { categories, uncategorized };
+}
+
+function formatPrecautionEditor(data) {
+  const blocks = Object.entries(data.categories)
+    .filter(([, statements]) => statements.length)
+    .map(([category, statements]) => `${category}\n${statements.join('\n')}`);
+  if (data.uncategorized.length) blocks.push(data.uncategorized.join('\n'));
+  return blocks.join('\n\n');
+}
+
 // 명시된 제목·레이블·코드만 사용하며 누락된 내용을 추정하지 않는다.
 function analyzeMsdsText(pages) {
   const lines = pages.join('\n').split(/\r?\n/).map(cleanLine).filter(Boolean);
@@ -280,21 +349,21 @@ function analyzeMsdsText(pages) {
   const sectionTwo = findSection(lines, 2, 3);
   const productSearch = sectionOne.length ? sectionOne : lines;
   const hazardSearch = sectionTwo.length ? sectionTwo : lines;
+  const repeatedNoise = findRepeatedPageFurniture(pages);
   const itemPrefix = '(?:[가-하]\\.?\\s*)?';
   const productName = extractAfterLabel(productSearch, [new RegExp(`^${itemPrefix}(?:제품명|상품명|물질명)\\s*[:：]?\\s*`, 'i')]);
   const supplierInfo = extractAfterLabel(productSearch, [new RegExp(`^${itemPrefix}(?:공급자(?:\\s*정보)?|제조자(?:\\s*정보)?|회사명)\\s*[:：]?\\s*`, 'i')], { maxLines: 5 });
   const signalWord = extractAfterLabel(hazardSearch, [new RegExp(`^${itemPrefix}신호어\\s*[:：]?\\s*`, 'i')]);
   const labeledHazards = extractAfterLabel(hazardSearch, [new RegExp(`^${itemPrefix}(?:유해[·ㆍ-]?위험문구|유해성[·ㆍ-]?위험문구)\\s*[:：]?\\s*`, 'i')], { maxLines: 8 });
-  const labeledPrecautions = extractAfterLabel(hazardSearch, [new RegExp(`^${itemPrefix}예방조치문구\\s*[:：]?\\s*`, 'i')], { maxLines: 12 });
   const hStatements = extractCodedStatements(hazardSearch, 'H');
-  const pStatements = extractCodedStatements(hazardSearch, 'P');
+  const categorizedPrecautions = collectCategorizedPrecautions(hazardSearch, repeatedNoise);
   const pictogramText = hazardSearch.filter((line) => /그림문자|픽토그램|pictogram/i.test(line)).join('\n');
   return {
     productName,
     supplierInfo,
     signalWord,
     hazardStatements: hStatements.length ? hStatements.join('\n') : labeledHazards,
-    precautionStatements: pStatements.length ? pStatements.join('\n') : labeledPrecautions,
+    precautionStatements: formatPrecautionEditor(categorizedPrecautions),
     pictogramText
   };
 }
@@ -449,6 +518,47 @@ function fillAnalysisResult(data) {
   setExtractedValue('precaution-statements', data.precautionStatements);
 }
 
+function renderPrecautionPreview(value) {
+  const parsed = collectCategorizedPrecautions(value.split(/\r?\n/));
+  const container = document.querySelector('#preview-precaution-groups');
+  const groups = Object.entries(parsed.categories).filter(([, statements]) => statements.length);
+  if (!groups.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-value';
+    empty.textContent = '분류가 확인된 예방조치문구가 없습니다.';
+    container.replaceChildren(empty);
+    return;
+  }
+  container.replaceChildren(...groups.map(([category, statements]) => {
+    const group = document.createElement('section');
+    group.className = 'precaution-group';
+    const title = document.createElement('h4');
+    title.textContent = category;
+    const text = document.createElement('p');
+    text.textContent = statements.slice(0, 7).join('\n');
+    group.append(title, text);
+    return group;
+  }));
+}
+
+function renderSupplierPreview(value) {
+  const phoneMatch = value.match(/(?:\+?82[-\s]?)?(?:0\d{1,2})[-\s)]?\d{3,4}[-\s]?\d{4}/);
+  const phone = phoneMatch?.[0]?.trim() || '';
+  const supplierLines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const supplierLine = supplierLines.find((line) => /공급자|회사명|제조자/i.test(line)) || supplierLines[0] || '';
+  const name = supplierLine
+    .replace(/^(?:공급자|회사명|제조자)(?:\s*정보)?\s*[:：]?\s*/i, '')
+    .split(/(?:연락처|전화|긴급전화|주소)\s*[:：]?/i)[0]
+    .replace(phone, '')
+    .trim();
+  const nameTarget = document.querySelector('#preview-supplier-name');
+  const phoneTarget = document.querySelector('#preview-supplier-phone');
+  nameTarget.textContent = name;
+  phoneTarget.textContent = phone;
+  nameTarget.classList.toggle('empty-value', !name);
+  phoneTarget.classList.toggle('empty-value', !phone);
+}
+
 function getAnalysisErrorMessage(error) {
   const name = error?.name || '';
   if (name === 'PasswordException') return '암호로 보호된 PDF는 현재 읽을 수 없습니다. 암호를 해제한 파일로 다시 시도해 주세요.';
@@ -554,18 +664,22 @@ analyzeButton.addEventListener('click', async () => {
 
 const emptyMessages = {
   'preview-product': '제품명',
-  'preview-signal': '신호어',
-  'preview-hazard': 'MSDS에서 확인한 내용을 입력하세요.',
-  'preview-precaution': 'MSDS에서 확인한 내용을 입력하세요.',
-  'preview-supplier': 'MSDS에서 확인한 공급자 정보를 입력하세요.'
+  'preview-signal': '',
+  'preview-hazard': 'MSDS에서 확인한 내용을 입력하세요.'
 };
 
 document.querySelectorAll('.preview-source').forEach((input) => {
   input.addEventListener('input', () => {
-    const preview = document.querySelector(`#${input.dataset.preview}`);
     const value = input.value.trim();
-    preview.textContent = value || emptyMessages[input.dataset.preview];
-    preview.classList.toggle('empty-value', !value);
+    if (input.dataset.preview === 'precaution-categories') {
+      renderPrecautionPreview(value);
+    } else if (input.dataset.preview === 'preview-supplier') {
+      renderSupplierPreview(value);
+    } else {
+      const preview = document.querySelector(`#${input.dataset.preview}`);
+      preview.textContent = value || emptyMessages[input.dataset.preview];
+      preview.classList.toggle('empty-value', !value);
+    }
     const totalCopyLength = document.querySelector('#hazard-statements').value.length + document.querySelector('#precaution-statements').value.length;
     document.querySelector('.warning-label').dataset.density = totalCopyLength > 1200 ? 'dense' : totalCopyLength > 700 ? 'compact' : 'normal';
   });
@@ -578,7 +692,7 @@ renderSelectedPictograms();
 let printStyleBackup = null;
 window.addEventListener('beforeprint', () => {
   const warningLabel = document.querySelector('.warning-label');
-  const paragraphs = warningLabel.querySelectorAll('.preview-copy p');
+  const paragraphs = warningLabel.querySelectorAll('.preview-hazard-section p, .precaution-group p');
   printStyleBackup = {
     width: warningLabel.style.width,
     height: warningLabel.style.height,
@@ -605,7 +719,7 @@ window.addEventListener('beforeprint', () => {
 window.addEventListener('afterprint', () => {
   if (!printStyleBackup) return;
   const warningLabel = document.querySelector('.warning-label');
-  const paragraphs = warningLabel.querySelectorAll('.preview-copy p');
+  const paragraphs = warningLabel.querySelectorAll('.preview-hazard-section p, .precaution-group p');
   warningLabel.style.width = printStyleBackup.width;
   warningLabel.style.height = printStyleBackup.height;
   warningLabel.style.minHeight = printStyleBackup.minHeight;
