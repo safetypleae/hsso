@@ -220,12 +220,12 @@ function normalized(line) {
 function isSectionHeading(line, number) {
   const value = normalized(line).replace(/[.·ㆍ:：()\-]/g, '');
   const titlePatterns = {
-    1: /화학제품(?:과|및)?회사(?:에관한)?정보/,
-    2: /유해성?위험성/,
-    3: /구성성분(?:의)?명칭(?:및|과)?함유량/
+    1: /^화학제품(?:과|및)?회사(?:에관한)?정보$/,
+    2: /^유해성?위험성$/,
+    3: /^구성성분(?:의)?명칭(?:및|과)?함유량$/
   };
-  if (!titlePatterns[number]?.test(value)) return false;
-  return new RegExp(`^(?:제?${number}(?:항|장)?|${number})`).test(value) || value.length < 36;
+  const withoutSectionNumber = value.replace(new RegExp(`^(?:제?${number}(?:항|장)?)`), '');
+  return titlePatterns[number]?.test(withoutSectionNumber) || false;
 }
 
 function buildDocumentLines(pages) {
