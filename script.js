@@ -1,4 +1,8 @@
-// DOM 요소 참조
+import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.mjs';
+
+// PDF.js 본체와 워커는 반드시 같은 버전을 사용한다.
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.worker.mjs';
+
 const dropZone = document.querySelector('#drop-zone');
 const fileInput = document.querySelector('#file-input');
 const fileInfo = document.querySelector('#file-info');
@@ -11,12 +15,21 @@ const customSize = document.querySelector('#custom-size');
 const customWidth = document.querySelector('#custom-width');
 const customHeight = document.querySelector('#custom-height');
 const analyzeButton = document.querySelector('#analyze-button');
+const analysisProgress = document.querySelector('#analysis-progress');
+const progressTitle = document.querySelector('#progress-title');
+const progressDetail = document.querySelector('#progress-detail');
+const analysisError = document.querySelector('#analysis-error');
+const analysisWarning = document.querySelector('#analysis-warning');
 const results = document.querySelector('#results');
 const selectedSizeText = document.querySelector('#selected-size-text');
+const rawTextToggle = document.querySelector('#raw-text-toggle');
+const rawTextPanel = document.querySelector('#raw-text-panel');
+const rawTextContent = document.querySelector('#raw-text-content');
+const rawTextSummary = document.querySelector('#raw-text-summary');
 
 let selectedFile = null;
+let isAnalyzing = false;
 
-// 파일 크기를 읽기 쉬운 단위로 변환한다.
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -32,19 +45,25 @@ function showFileError(message) {
   fileError.hidden = false;
 }
 
-// PDF만 화면 상태에 반영하며 파일 내용은 읽거나 분석하지 않는다.
+function clearAnalysisMessages() {
+  analysisError.hidden = true;
+  analysisWarning.hidden = true;
+}
+
+// PDF만 화면 상태에 반영하며 선택 단계에서는 파일 내용을 읽지 않는다.
 function selectFile(file) {
   fileError.hidden = true;
+  clearAnalysisMessages();
   if (!isPdf(file)) {
     showFileError('PDF 파일만 선택할 수 있습니다.');
     return;
   }
-
   selectedFile = file;
   fileName.textContent = file.name;
   fileSize.textContent = formatFileSize(file.size);
   fileInfo.hidden = false;
   dropZone.hidden = true;
+  results.hidden = true;
   updateAnalyzeButton();
 }
 
@@ -55,6 +74,9 @@ function removeFile() {
   dropZone.hidden = false;
   fileError.hidden = true;
   results.hidden = true;
+  rawTextPanel.hidden = true;
+  rawTextToggle.setAttribute('aria-expanded', 'false');
+  clearAnalysisMessages();
   updateAnalyzeButton();
 }
 
@@ -66,10 +88,9 @@ function hasValidSize() {
 }
 
 function updateAnalyzeButton() {
-  analyzeButton.disabled = !(selectedFile && hasValidSize());
+  analyzeButton.disabled = isAnalyzing || !(selectedFile && hasValidSize());
 }
 
-// 클릭, 키보드, 드래그 앤 드롭으로 파일을 선택한다.
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' || event.key === ' ') {
@@ -94,7 +115,6 @@ removeFileButton.addEventListener('click', removeFile);
 });
 dropZone.addEventListener('drop', (event) => selectFile(event.dataTransfer.files[0]));
 
-// 크기 선택 및 직접 입력 유효성을 관리한다.
 sizeInputs.forEach((input) => {
   input.addEventListener('change', () => {
     customSize.hidden = input.value !== 'custom';
@@ -103,17 +123,208 @@ sizeInputs.forEach((input) => {
 });
 [customWidth, customHeight].forEach((input) => input.addEventListener('input', updateAnalyzeButton));
 
-// 현재 MVP에서는 분석 대신 비어 있는 편집 화면을 표시한다.
-analyzeButton.addEventListener('click', () => {
-  const selectedSize = document.querySelector('input[name="label-size"]:checked');
-  selectedSizeText.textContent = selectedSize.value === 'custom'
-    ? `${customWidth.value} × ${customHeight.value} mm`
-    : `${selectedSize.value} 선택됨`;
-  results.hidden = false;
-  results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+// PDF 텍스트 항목의 좌표를 이용해 사람이 읽는 줄에 가깝게 재구성한다.
+function buildPageText(items) {
+  const textItems = items
+    .filter((item) => typeof item.str === 'string' && item.str.trim())
+    .map((item) => ({ text: item.str.trim(), x: item.transform[4], y: item.transform[5] }))
+    .sort((a, b) => Math.abs(b.y - a.y) > 3 ? b.y - a.y : a.x - b.x);
+  const lines = [];
+  textItems.forEach((item) => {
+    let line = lines.find((candidate) => Math.abs(candidate.y - item.y) <= 3);
+    if (!line) {
+      line = { y: item.y, items: [] };
+      lines.push(line);
+    }
+    line.items.push(item);
+  });
+  return lines
+    .sort((a, b) => b.y - a.y)
+    .map((line) => line.items.sort((a, b) => a.x - b.x).map((item) => item.text).join(' '))
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+async function extractPdfText(file) {
+  const data = new Uint8Array(await file.arrayBuffer());
+  const loadingTask = pdfjsLib.getDocument({ data });
+  const pdf = await loadingTask.promise;
+  const pageCount = pdf.numPages;
+  const pages = [];
+  progressTitle.textContent = `총 ${pageCount}페이지를 확인했습니다.`;
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    progressDetail.textContent = `${pageNumber} / ${pageCount} 페이지의 텍스트를 추출하는 중입니다.`;
+    const page = await pdf.getPage(pageNumber);
+    const textContent = await page.getTextContent({ includeMarkedContent: false });
+    pages.push(buildPageText(textContent.items));
+    page.cleanup();
+  }
+  await pdf.destroy();
+  return { pageCount, pages };
+}
+
+function cleanLine(line) {
+  return line.replace(/^[\s:：·•\-–—]+|[\s]+$/g, '').trim();
+}
+
+function normalized(line) {
+  return line.replace(/\s+/g, '').replace(/[ㆍ·・]/g, '·').toLowerCase();
+}
+
+function isSectionHeading(line, number) {
+  const value = normalized(line);
+  const titles = {
+    1: ['화학제품과회사에관한정보', '화학제품과회사정보', '화학제품및회사에관한정보'],
+    2: ['유해성·위험성', '유해성위험성', '유해위험성'],
+    3: ['구성성분의명칭및함유량', '구성성분의명칭과함유량']
+  };
+  return new RegExp(`^(제)?${number}(장|항|\\.|\\)|\\s)`).test(line.trim()) ||
+    (titles[number] || []).some((title) => value.includes(title));
+}
+
+function findSection(lines, startNumber, endNumber) {
+  const start = lines.findIndex((line) => isSectionHeading(line, startNumber));
+  if (start < 0) return [];
+  const relativeEnd = lines.slice(start + 1).findIndex((line) => isSectionHeading(line, endNumber));
+  const end = relativeEnd < 0 ? Math.min(lines.length, start + 80) : start + 1 + relativeEnd;
+  return lines.slice(start + 1, end);
+}
+
+function isKnownLabel(line) {
+  return /^(제품명|상품명|물질명|공급자|제조자|회사명|주소|긴급전화|담당부서|신호어|그림문자|유해.*위험문구|유해위험문구|예방조치문구)/.test(normalized(line));
+}
+
+function extractAfterLabel(lines, labelPatterns, options = {}) {
+  const { maxLines = 1, stopAtLabel = true } = options;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const pattern = labelPatterns.find((candidate) => candidate.test(line));
+    if (!pattern) continue;
+    const inline = cleanLine(line.replace(pattern, ''));
+    const values = inline ? [inline] : [];
+    for (let offset = 1; offset <= maxLines && index + offset < lines.length; offset += 1) {
+      const next = cleanLine(lines[index + offset]);
+      if (!next || (stopAtLabel && isKnownLabel(next)) || isSectionHeading(next, 2) || isSectionHeading(next, 3)) break;
+      values.push(next);
+    }
+    const result = values.join('\n').trim();
+    if (result) return result;
+  }
+  return '';
+}
+
+function extractCodedStatements(lines, prefix) {
+  const codePattern = prefix === 'H' ? /\bH\d{3}\b/i : /\bP\d{3}(?:\+P\d{3})*\b/i;
+  const results = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!codePattern.test(lines[index])) continue;
+    let statement = cleanLine(lines[index]);
+    if (statement.match(codePattern)?.[0] === statement && lines[index + 1] && !isKnownLabel(lines[index + 1])) {
+      statement += ` ${cleanLine(lines[index + 1])}`;
+    }
+    if (!results.includes(statement)) results.push(statement);
+  }
+  return results;
+}
+
+// 명시된 제목·레이블·코드만 사용하며 누락된 내용을 추정하지 않는다.
+function analyzeMsdsText(pages) {
+  const lines = pages.join('\n').split(/\r?\n/).map(cleanLine).filter(Boolean);
+  const sectionOne = findSection(lines, 1, 2);
+  const sectionTwo = findSection(lines, 2, 3);
+  const productSearch = sectionOne.length ? sectionOne : lines;
+  const hazardSearch = sectionTwo.length ? sectionTwo : lines;
+  const itemPrefix = '(?:[가-하]\\.?\\s*)?';
+  const productName = extractAfterLabel(productSearch, [new RegExp(`^${itemPrefix}(?:제품명|상품명|물질명)\\s*[:：]?\\s*`, 'i')]);
+  const supplierInfo = extractAfterLabel(productSearch, [new RegExp(`^${itemPrefix}(?:공급자(?:\\s*정보)?|제조자(?:\\s*정보)?|회사명)\\s*[:：]?\\s*`, 'i')], { maxLines: 5 });
+  const signalWord = extractAfterLabel(hazardSearch, [new RegExp(`^${itemPrefix}신호어\\s*[:：]?\\s*`, 'i')]);
+  const labeledHazards = extractAfterLabel(hazardSearch, [new RegExp(`^${itemPrefix}(?:유해[·ㆍ-]?위험문구|유해성[·ㆍ-]?위험문구)\\s*[:：]?\\s*`, 'i')], { maxLines: 8 });
+  const labeledPrecautions = extractAfterLabel(hazardSearch, [new RegExp(`^${itemPrefix}예방조치문구\\s*[:：]?\\s*`, 'i')], { maxLines: 12 });
+  const hStatements = extractCodedStatements(hazardSearch, 'H');
+  const pStatements = extractCodedStatements(hazardSearch, 'P');
+  const pictogramText = hazardSearch.filter((line) => /그림문자|픽토그램|pictogram/i.test(line)).join('\n');
+  return {
+    productName,
+    supplierInfo,
+    signalWord,
+    hazardStatements: hStatements.length ? hStatements.join('\n') : labeledHazards,
+    precautionStatements: pStatements.length ? pStatements.join('\n') : labeledPrecautions,
+    pictogramText
+  };
+}
+
+function setExtractedValue(inputId, value) {
+  const input = document.querySelector(`#${inputId}`);
+  input.value = value;
+  input.dispatchEvent(new Event('input'));
+  const status = document.querySelector(`#status-${inputId}`);
+  // 텍스트가 추출되어도 원본 대조 전에는 확정하지 않는다.
+  status.textContent = '확인 필요';
+  status.classList.remove('status-check');
+  status.classList.add('status-needed');
+}
+
+function fillAnalysisResult(data) {
+  setExtractedValue('product-name', data.productName);
+  setExtractedValue('supplier-info', data.supplierInfo);
+  setExtractedValue('signal-word', data.signalWord);
+  setExtractedValue('hazard-statements', data.hazardStatements);
+  setExtractedValue('precaution-statements', data.precautionStatements);
+  document.querySelector('#pictogram-detected').textContent = data.pictogramText
+    ? `PDF에서 발견한 관련 텍스트: ${data.pictogramText}`
+    : '그림문자 관련 텍스트를 확정하지 못했습니다. 원본 MSDS에서 직접 확인해 주세요.';
+}
+
+function getAnalysisErrorMessage(error) {
+  const name = error?.name || '';
+  if (name === 'PasswordException') return '암호로 보호된 PDF는 현재 읽을 수 없습니다. 암호를 해제한 파일로 다시 시도해 주세요.';
+  if (name === 'InvalidPDFException') return '올바르지 않거나 손상된 PDF 파일입니다. 원본 파일을 확인해 주세요.';
+  if (name === 'MissingPDFException') return 'PDF 파일을 불러오지 못했습니다. 파일을 다시 선택해 주세요.';
+  if (name === 'UnexpectedResponseException') return 'PDF를 읽는 중 예상하지 못한 응답이 발생했습니다.';
+  return 'PDF 분석에 실패했습니다. 파일이 손상되지 않았는지 확인한 뒤 다시 시도해 주세요.';
+}
+
+analyzeButton.addEventListener('click', async () => {
+  if (!selectedFile || !hasValidSize() || isAnalyzing) return;
+  isAnalyzing = true;
+  updateAnalyzeButton();
+  clearAnalysisMessages();
+  results.hidden = true;
+  analysisProgress.hidden = false;
+  progressTitle.textContent = 'PDF를 읽고 있습니다.';
+  progressDetail.textContent = '파일은 외부 서버로 전송되지 않습니다.';
+  analyzeButton.querySelector('span:first-child').textContent = '분석 중...';
+  try {
+    const extracted = await extractPdfText(selectedFile);
+    const rawText = extracted.pages.map((page, index) => `[${index + 1} 페이지]\n${page}`).join('\n\n');
+    const meaningfulLength = extracted.pages.join('').replace(/\s/g, '').length;
+    const isLikelyScanned = meaningfulLength < 200 || meaningfulLength / extracted.pageCount < 40;
+    fillAnalysisResult(analyzeMsdsText(extracted.pages));
+    rawTextContent.textContent = rawText || '(추출된 텍스트가 없습니다.)';
+    rawTextSummary.textContent = `${extracted.pageCount}페이지 · ${meaningfulLength.toLocaleString('ko-KR')}자`;
+    const selectedSize = document.querySelector('input[name="label-size"]:checked');
+    selectedSizeText.textContent = selectedSize.value === 'custom'
+      ? `${customWidth.value} × ${customHeight.value} mm`
+      : `${selectedSize.value} 선택됨`;
+    results.hidden = false;
+    if (isLikelyScanned) {
+      analysisWarning.textContent = '텍스트를 충분히 추출하지 못했습니다. 이미지형 또는 스캔형 MSDS일 수 있습니다.';
+      analysisWarning.hidden = false;
+    }
+    results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) {
+    console.error('PDF 분석 오류:', error);
+    analysisError.textContent = getAnalysisErrorMessage(error);
+    analysisError.hidden = false;
+  } finally {
+    isAnalyzing = false;
+    analysisProgress.hidden = true;
+    analyzeButton.querySelector('span:first-child').textContent = 'MSDS 분석하기';
+    updateAnalyzeButton();
+  }
 });
 
-// 입력값을 경고표지 미리보기에 즉시 반영한다.
 const emptyMessages = {
   'preview-product': '제품명',
   'preview-signal': '신호어',
@@ -131,7 +342,12 @@ document.querySelectorAll('.preview-source').forEach((input) => {
   });
 });
 
-// 모바일 메뉴와 추후 개발 메뉴 안내
+rawTextToggle.addEventListener('click', () => {
+  const willOpen = rawTextPanel.hidden;
+  rawTextPanel.hidden = !willOpen;
+  rawTextToggle.setAttribute('aria-expanded', String(willOpen));
+});
+
 const menuButton = document.querySelector('.menu-button');
 const mainMenu = document.querySelector('#main-menu');
 menuButton.addEventListener('click', () => {
