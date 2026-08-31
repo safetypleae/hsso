@@ -218,56 +218,75 @@ function normalized(line) {
 }
 
 function isSectionHeading(line, number) {
-  const value = normalized(line);
-  const titles = {
-    1: ['화학제품과회사에관한정보', '화학제품과회사정보', '화학제품및회사에관한정보'],
-    2: ['유해성·위험성', '유해성위험성', '유해위험성'],
-    3: ['구성성분의명칭및함유량', '구성성분의명칭과함유량']
+  const value = normalized(line).replace(/[.·ㆍ:：()\-]/g, '');
+  const titlePatterns = {
+    1: /화학제품(?:과|및)?회사(?:에관한)?정보/,
+    2: /유해성?위험성/,
+    3: /구성성분(?:의)?명칭(?:및|과)?함유량/
   };
-  return new RegExp(`^(제)?${number}(장|항|\\.|\\)|\\s)`).test(line.trim()) ||
-    (titles[number] || []).some((title) => value.includes(title));
+  if (!titlePatterns[number]?.test(value)) return false;
+  return new RegExp(`^(?:제?${number}(?:항|장)?|${number})`).test(value) || value.length < 36;
 }
 
-function findSection(lines, startNumber, endNumber) {
-  const start = lines.findIndex((line) => isSectionHeading(line, startNumber));
-  if (start < 0) return [];
-  const relativeEnd = lines.slice(start + 1).findIndex((line) => isSectionHeading(line, endNumber));
-  const end = relativeEnd < 0 ? Math.min(lines.length, start + 80) : start + 1 + relativeEnd;
-  return lines.slice(start + 1, end);
+function buildDocumentLines(pages) {
+  return pages.flatMap((pageText, pageIndex) => pageText.split(/\r?\n/).map((text, lineIndex) => ({
+    text: cleanLine(text),
+    pageNumber: pageIndex + 1,
+    lineNumber: lineIndex + 1
+  })).filter((line) => line.text));
+}
+
+function locateMsdsSections(documentLines) {
+  const candidates = { 1: [], 2: [], 3: [] };
+  documentLines.forEach((line, index) => {
+    [1, 2, 3].forEach((number) => {
+      if (isSectionHeading(line.text, number)) candidates[number].push(index);
+    });
+  });
+  let best = null;
+  candidates[1].forEach((one) => {
+    candidates[2].filter((two) => two > one).forEach((two) => {
+      candidates[3].filter((three) => three > two).forEach((three) => {
+        if (candidates[1].some((index) => index > one && index < two)) return;
+        if (candidates[2].some((index) => index > two && index < three)) return;
+        const sectionOneText = documentLines.slice(one + 1, two).map((line) => line.text).join('\n');
+        const sectionTwoText = documentLines.slice(two + 1, three).map((line) => line.text).join('\n');
+        let score = 0;
+        if (/제품명|상품명|물질명|화학제품명/.test(sectionOneText)) score += 12;
+        if (/공급자|유통업자|제조회사|회사명|긴급전화/.test(sectionOneText)) score += 12;
+        if (/신호어|그림문자/.test(sectionTwoText)) score += 10;
+        score += Math.min(24, (sectionTwoText.match(/\bH\d{3}\b/g) || []).length * 3);
+        score += Math.min(24, (sectionTwoText.match(/\bP\d{3}(?:\+P\d{3})*\b/g) || []).length * 2);
+        if (two - one < 3) score -= 20;
+        if (three - two < 6) score -= 20;
+        if (!best || score > best.score || (score === best.score && one > best.one)) best = { one, two, three, score };
+      });
+    });
+  });
+  if (best) return best;
+  const one = candidates[1][0] ?? -1;
+  const two = candidates[2].find((index) => index > one) ?? -1;
+  const three = candidates[3].find((index) => index > two) ?? -1;
+  return { one, two, three, score: 0 };
 }
 
 function isKnownLabel(line) {
-  return /^(제품명|상품명|물질명|공급자|제조자|회사명|주소|긴급전화|담당부서|신호어|그림문자|유해.*위험문구|유해위험문구|예방조치문구)/.test(normalized(line));
-}
-
-function extractAfterLabel(lines, labelPatterns, options = {}) {
-  const { maxLines = 1, stopAtLabel = true } = options;
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const pattern = labelPatterns.find((candidate) => candidate.test(line));
-    if (!pattern) continue;
-    const inline = cleanLine(line.replace(pattern, ''));
-    const values = inline ? [inline] : [];
-    for (let offset = 1; offset <= maxLines && index + offset < lines.length; offset += 1) {
-      const next = cleanLine(lines[index + offset]);
-      if (!next || (stopAtLabel && isKnownLabel(next)) || isSectionHeading(next, 2) || isSectionHeading(next, 3)) break;
-      values.push(next);
-    }
-    const result = values.join('\n').trim();
-    if (result) return result;
-  }
-  return '';
+  return /^(?:[가-하]\.?\s*)?(제품명|상품명|물질명|공급자|제조자|회사명|주소|긴급전화|담당부서|신호어|그림문자|유해.*위험문구|유해위험문구|예방조치문구)/.test(normalized(line));
 }
 
 function extractCodedStatements(lines, prefix) {
-  const codePattern = prefix === 'H' ? /\bH\d{3}\b/i : /\bP\d{3}(?:\+P\d{3})*\b/i;
+  const codePattern = prefix === 'H' ? /^H\d{3}\b/i : /^P\d{3}(?:\+P\d{3})*\b/i;
   const results = [];
   for (let index = 0; index < lines.length; index += 1) {
     if (!codePattern.test(lines[index])) continue;
     let statement = cleanLine(lines[index]);
-    if (statement.match(codePattern)?.[0] === statement && lines[index + 1] && !isKnownLabel(lines[index + 1])) {
-      statement += ` ${cleanLine(lines[index + 1])}`;
+    for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+      const next = cleanLine(lines[nextIndex]);
+      if (!next || isPdfNoiseLine(next)) continue;
+      if (/^[HP]\d{3}\b/i.test(next) || getPrecautionCategory(next) || isKnownLabel(next) || isSectionHeading(next, 3)) break;
+      statement += ` ${next}`;
     }
+    statement = statement.replace(/\s+/g, ' ').trim();
     if (!results.includes(statement)) results.push(statement);
   }
   return results;
@@ -275,11 +294,11 @@ function extractCodedStatements(lines, prefix) {
 
 function isPdfNoiseLine(line, repeatedNoise = new Set()) {
   const value = line.trim();
-  return repeatedNoise.has(normalized(value)) || /물질안전보건자료\s*\(?MSDS\)?|산업안전보건법|https?:\/\/|www\.|문서\s*번호|document\s*no\.?|revision|개정\s*(?:번호|일자)|^\s*(?:page\s*)?\d+\s*(?:\/|of)\s*\d+\s*$/i.test(value);
+  return repeatedNoise.has(normalized(value)) || /물질안전보건자료\s*\(?MSDS\)?|산업안전보건법|https?:\/\/|www\.|문서\s*번호|document\s*no\.?|revision|개정\s*(?:번호|일자)|^\s*\d{1,3}\s*$|^\s*(?:page\s*)?\d+\s*(?:\/|of)\s*\d+\s*$/i.test(value);
 }
 
 function getPrecautionCategory(line) {
-  const match = line.match(/^(?:[가-하]\.?\s*)?(예방|대응|저장|폐기)(?:\s*[:：-]\s*|\s*$)/);
+  const match = line.match(/^(?:[가-하]\.?\s*)?(예방|대응|저장|폐기)(?:\s*[:：-]\s*|\s+(?=P\d{3})|\s*$)/);
   return match ? match[1] : '';
 }
 
@@ -288,7 +307,7 @@ function findRepeatedPageFurniture(pages) {
   pages.forEach((page) => {
     const uniqueLines = new Set(page.split(/\r?\n/).map(cleanLine).filter(Boolean));
     uniqueLines.forEach((line) => {
-      if (line.length > 120 || /^P\d{3}/i.test(line) || getPrecautionCategory(line)) return;
+      if (line.length > 120 || /^[HP]\d{3}/i.test(line) || getPrecautionCategory(line)) return;
       const key = normalized(line);
       pageOccurrences.set(key, (pageOccurrences.get(key) || 0) + 1);
     });
@@ -311,20 +330,21 @@ function collectCategorizedPrecautions(lines, repeatedNoise = new Set()) {
   }
 
   lines.forEach((rawLine) => {
-    const line = cleanLine(rawLine);
+    let line = cleanLine(rawLine);
     if (!line || isPdfNoiseLine(line, repeatedNoise)) return;
     const category = getPrecautionCategory(line);
     if (category) {
       saveStatement();
       currentCategory = category;
-      return;
+      line = cleanLine(line.replace(/^(?:[가-하]\.?\s*)?(?:예방|대응|저장|폐기)(?:\s*[:：-]\s*|\s+(?=P\d{3})|\s*$)/, ''));
+      if (!line) return;
     }
     if (/^P\d{3}(?:\+P\d{3})*\b/i.test(line)) {
       saveStatement();
       currentStatement = line;
       return;
     }
-    if (currentStatement && !isKnownLabel(line) && !isSectionHeading(line, 3)) {
+    if (currentStatement && !/^H\d{3}\b/i.test(line) && !isKnownLabel(line) && !isSectionHeading(line, 3)) {
       currentStatement += ` ${line}`;
     } else if (currentStatement) {
       saveStatement();
@@ -332,6 +352,54 @@ function collectCategorizedPrecautions(lines, repeatedNoise = new Set()) {
   });
   saveStatement();
   return { categories, uncategorized };
+}
+
+function extractFieldValue(lines, patterns, maxFollowingLines = 2) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const pattern = patterns.find((candidate) => candidate.test(lines[index]));
+    if (!pattern) continue;
+    const inlineValue = cleanLine(lines[index].replace(pattern, ''));
+    if (inlineValue) return inlineValue;
+    for (let offset = 1; offset <= maxFollowingLines && index + offset < lines.length; offset += 1) {
+      const candidate = cleanLine(lines[index + offset]);
+      if (!candidate || isPdfNoiseLine(candidate)) continue;
+      if (isKnownLabel(candidate) || isSectionHeading(candidate, 2)) break;
+      return candidate;
+    }
+  }
+  return '';
+}
+
+function extractSupplierData(lines) {
+  const phonePattern = /(?:\+?82[-\s]?)?(?:0\d{1,2})[-\s)]?\d{3,4}[-\s]?\d{4}/;
+  const preferredSupplierPatterns = [
+    /^(?:[가-하]\.?)?\s*(?:유통회사명|공급회사명?|공급자명|유통업자명)\s*[:：]?\s*/i,
+    /^(?:[가-하]\.?)?\s*(?:공급자|유통업자)\s*[:：]\s*/i
+  ];
+  const manufacturerPatterns = [
+    /^(?:[가-하]\.?)?\s*(?:제조회사명|제조사명|공급자명|유통업자명|회사명|제조자명)\s*[:：]?\s*/i,
+    /^(?:[가-하]\.?)?\s*제조자\s*[:：]\s*/i
+  ];
+  let supplierName = extractFieldValue(lines, preferredSupplierPatterns, 2) || extractFieldValue(lines, manufacturerPatterns, 2);
+  const supplierHeadingIndex = lines.findIndex((line) => /공급자\s*\/?\s*유통업자\s*정보|공급자\s*정보|제조자\s*정보/i.test(line));
+  if (!supplierName && supplierHeadingIndex >= 0) {
+    supplierName = lines.slice(supplierHeadingIndex + 1, supplierHeadingIndex + 10)
+      .map(cleanLine)
+      .find((line) => line && !isPdfNoiseLine(line) && !/주소|전화|연락처|긴급|담당부서|팩스|fax/i.test(line) && !isKnownLabel(line)) || '';
+  }
+  supplierName = supplierName
+    .replace(/^(?:공급자\s*\/?\s*유통업자\s*정보|공급자\s*정보|제조회사명|공급자명|회사명)\s*[:：]?\s*/i, '')
+    .split(/(?:주소|전화|연락처|긴급전화|담당부서)\s*[:：]?/i)[0]
+    .replace(phonePattern, '')
+    .trim();
+
+  const phoneLabelIndex = lines.findIndex((line) => /긴급(?:연락)?전화(?:번호)?|연락처|전화번호/i.test(line));
+  const nearbyPhoneLine = phoneLabelIndex >= 0
+    ? lines.slice(phoneLabelIndex, phoneLabelIndex + 3).find((line) => phonePattern.test(line)) : '';
+  const labelledPhoneLine = lines.find((line) => /긴급(?:연락)?전화(?:번호)?|연락처|전화(?:번호)?|tel\.?/i.test(line) && phonePattern.test(line));
+  const fallbackPhoneLine = lines.find((line) => phonePattern.test(line));
+  const contact = (nearbyPhoneLine || labelledPhoneLine || fallbackPhoneLine || '').match(phonePattern)?.[0]?.trim() || '';
+  return { supplierName, contact };
 }
 
 function formatPrecautionEditor(data) {
@@ -344,17 +412,24 @@ function formatPrecautionEditor(data) {
 
 // 명시된 제목·레이블·코드만 사용하며 누락된 내용을 추정하지 않는다.
 function analyzeMsdsText(pages) {
-  const lines = pages.join('\n').split(/\r?\n/).map(cleanLine).filter(Boolean);
-  const sectionOne = findSection(lines, 1, 2);
-  const sectionTwo = findSection(lines, 2, 3);
-  const productSearch = sectionOne.length ? sectionOne : lines;
-  const hazardSearch = sectionTwo.length ? sectionTwo : lines;
+  const documentLines = buildDocumentLines(pages);
+  const locations = locateMsdsSections(documentLines);
   const repeatedNoise = findRepeatedPageFurniture(pages);
+  const sectionOneLines = locations.one >= 0 && locations.two > locations.one
+    ? documentLines.slice(locations.one + 1, locations.two) : [];
+  const sectionTwoLines = locations.two >= 0
+    ? documentLines.slice(locations.two + 1, locations.three > locations.two ? locations.three : documentLines.length) : [];
+  const cleanSection = (sectionLines) => sectionLines
+    .filter((line) => !isPdfNoiseLine(line.text, repeatedNoise))
+    .map((line) => line.text);
+  const allTextLines = documentLines.map((line) => line.text);
+  const productSearch = cleanSection(sectionOneLines).length ? cleanSection(sectionOneLines) : allTextLines;
+  const hazardSearch = cleanSection(sectionTwoLines).length ? cleanSection(sectionTwoLines) : allTextLines;
   const itemPrefix = '(?:[가-하]\\.?\\s*)?';
-  const productName = extractAfterLabel(productSearch, [new RegExp(`^${itemPrefix}(?:제품명|상품명|물질명)\\s*[:：]?\\s*`, 'i')]);
-  const supplierInfo = extractAfterLabel(productSearch, [new RegExp(`^${itemPrefix}(?:공급자(?:\\s*정보)?|제조자(?:\\s*정보)?|회사명)\\s*[:：]?\\s*`, 'i')], { maxLines: 5 });
-  const signalWord = extractAfterLabel(hazardSearch, [new RegExp(`^${itemPrefix}신호어\\s*[:：]?\\s*`, 'i')]);
-  const labeledHazards = extractAfterLabel(hazardSearch, [new RegExp(`^${itemPrefix}(?:유해[·ㆍ-]?위험문구|유해성[·ㆍ-]?위험문구)\\s*[:：]?\\s*`, 'i')], { maxLines: 8 });
+  const productName = extractFieldValue(productSearch, [new RegExp(`^${itemPrefix}(?:제품명|제품의\\s*명칭|화학제품명|상품명|물질명)\\s*[:：]?\\s*`, 'i')], 2);
+  const supplier = extractSupplierData(productSearch);
+  const supplierInfo = [supplier.supplierName, supplier.contact ? `연락처: ${supplier.contact}` : ''].filter(Boolean).join('\n');
+  const signalWord = extractFieldValue(hazardSearch, [new RegExp(`^${itemPrefix}신호어\\s*[:：]?\\s*`, 'i')], 1);
   const hStatements = extractCodedStatements(hazardSearch, 'H');
   const categorizedPrecautions = collectCategorizedPrecautions(hazardSearch, repeatedNoise);
   const pictogramText = hazardSearch.filter((line) => /그림문자|픽토그램|pictogram/i.test(line)).join('\n');
@@ -362,9 +437,18 @@ function analyzeMsdsText(pages) {
     productName,
     supplierInfo,
     signalWord,
-    hazardStatements: hStatements.length ? hStatements.join('\n') : labeledHazards,
+    hazardStatements: hStatements.join('\n'),
     precautionStatements: formatPrecautionEditor(categorizedPrecautions),
-    pictogramText
+    pictogramText,
+    parserDebug: {
+      locations,
+      documentLines,
+      sectionTwoLines,
+      sectionTwoText: sectionTwoLines.map((line) => line.text).join('\n'),
+      hCodes: hStatements.map((statement) => statement.match(/^H\d{3}/i)?.[0]).filter(Boolean),
+      precautionCodes: Object.fromEntries(Object.entries(categorizedPrecautions.categories).map(([category, statements]) => [category, statements.map((statement) => statement.match(/^P\d{3}(?:\+P\d{3})*/i)?.[0]).filter(Boolean)])),
+      supplier
+    }
   };
 }
 
@@ -499,6 +583,42 @@ function showPictogramDebug(evidence) {
   console.groupEnd();
 }
 
+function showParserDebug(result, extracted) {
+  const debug = result.parserDebug;
+  const describeLocation = (index) => {
+    const line = debug.documentLines[index];
+    return line ? `${line.pageNumber}페이지 ${line.lineNumber}줄 — ${line.text}` : '탐지되지 않음';
+  };
+  const codeText = (codes) => codes.length ? codes.join(', ') : '없음';
+  document.querySelector('#parser-section-one').textContent = describeLocation(debug.locations.one);
+  document.querySelector('#parser-section-two').textContent = describeLocation(debug.locations.two);
+  document.querySelector('#parser-section-three').textContent = describeLocation(debug.locations.three);
+  document.querySelector('#parser-h-codes').textContent = codeText(debug.hCodes);
+  document.querySelector('#parser-prevention-codes').textContent = codeText(debug.precautionCodes.예방);
+  document.querySelector('#parser-response-codes').textContent = codeText(debug.precautionCodes.대응);
+  document.querySelector('#parser-storage-codes').textContent = codeText(debug.precautionCodes.저장);
+  document.querySelector('#parser-disposal-codes').textContent = codeText(debug.precautionCodes.폐기);
+  document.querySelector('#parser-supplier-name').textContent = debug.supplier.supplierName || '없음';
+  document.querySelector('#parser-contact').textContent = debug.supplier.contact || '없음';
+  document.querySelector('#parser-section-two-text').textContent = debug.sectionTwoText || '제2항 범위를 탐지하지 못했습니다.';
+
+  console.groupCollapsed('[HSSO MSDS 텍스트 파싱]');
+  console.info('전체 페이지 수:', extracted.pageCount);
+  extracted.pages.forEach((page, index) => console.info(`${index + 1}페이지 추출 텍스트:`, page));
+  console.info('제1항 시작 위치:', describeLocation(debug.locations.one));
+  console.info('제2항 시작 위치:', describeLocation(debug.locations.two));
+  console.info('제3항 시작 위치:', describeLocation(debug.locations.three));
+  console.info('제2항 판단 원문 전체:', debug.sectionTwoText);
+  console.info('추출된 H-code 목록:', debug.hCodes);
+  console.info('예방 P-code 목록:', debug.precautionCodes.예방);
+  console.info('대응 P-code 목록:', debug.precautionCodes.대응);
+  console.info('저장 P-code 목록:', debug.precautionCodes.저장);
+  console.info('폐기 P-code 목록:', debug.precautionCodes.폐기);
+  console.info('공급자명:', debug.supplier.supplierName);
+  console.info('연락처:', debug.supplier.contact);
+  console.groupEnd();
+}
+
 function setExtractedValue(inputId, value) {
   const input = document.querySelector(`#${inputId}`);
   input.value = value;
@@ -620,7 +740,9 @@ analyzeButton.addEventListener('click', async () => {
     const pictogramEvidence = findSectionTwoEvidence(extracted);
     showDiagnostics(diagnostics);
     logDiagnostics(selectedFile, diagnostics);
-    fillAnalysisResult(analyzeMsdsText(extracted.pages));
+    const analysisResult = analyzeMsdsText(extracted.pages);
+    fillAnalysisResult(analysisResult);
+    showParserDebug(analysisResult, extracted);
     applyDetectedPictograms(pictogramEvidence);
     showPictogramDebug(pictogramEvidence);
     rawTextContent.textContent = rawText || '(추출된 텍스트가 없습니다.)';
