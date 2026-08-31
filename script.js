@@ -39,15 +39,15 @@ const previewPictograms = document.querySelector('#preview-pictograms');
 const statusPictograms = document.querySelector('#status-pictograms');
 
 const GHS_PICTOGRAMS = [
-  { code: 'GHS01', name: '폭발', asset: 'assets/ghs/ghs01.svg', aliases: ['폭발', '폭발성', 'exploding bomb'] },
-  { code: 'GHS02', name: '불꽃', asset: 'assets/ghs/ghs02.svg', aliases: ['불꽃', '인화성', 'flame'] },
-  { code: 'GHS03', name: '산화성', asset: 'assets/ghs/ghs03.svg', aliases: ['산화성', '원 위의 불꽃', 'flame over circle'] },
-  { code: 'GHS04', name: '가스용기', asset: 'assets/ghs/ghs04.svg', aliases: ['가스용기', '고압가스', 'gas cylinder'] },
-  { code: 'GHS05', name: '부식성', asset: 'assets/ghs/ghs05.svg', aliases: ['부식성', '부식', 'corrosion'] },
-  { code: 'GHS06', name: '해골과 뼈', asset: 'assets/ghs/ghs06.svg', aliases: ['해골과 뼈', '해골', 'skull and crossbones'] },
-  { code: 'GHS07', name: '느낌표', asset: 'assets/ghs/ghs07.svg', aliases: ['느낌표', 'exclamation mark'] },
-  { code: 'GHS08', name: '건강유해성', asset: 'assets/ghs/ghs08.svg', aliases: ['건강유해성', '건강 유해성', 'health hazard'] },
-  { code: 'GHS09', name: '환경유해성', asset: 'assets/ghs/ghs09.svg', aliases: ['환경유해성', '환경 유해성', 'environment'] }
+  { code: 'GHS01', name: '폭발', asset: 'assets/ghs/ghs01.svg', exactNames: ['폭발하는 폭탄', 'exploding bomb'] },
+  { code: 'GHS02', name: '불꽃', asset: 'assets/ghs/ghs02.svg', exactNames: ['불꽃', 'flame'] },
+  { code: 'GHS03', name: '산화성', asset: 'assets/ghs/ghs03.svg', exactNames: ['원 위의 불꽃', 'flame over circle'] },
+  { code: 'GHS04', name: '가스용기', asset: 'assets/ghs/ghs04.svg', exactNames: ['가스용기', '가스 실린더', 'gas cylinder'] },
+  { code: 'GHS05', name: '부식성', asset: 'assets/ghs/ghs05.svg', exactNames: ['부식', 'corrosion'] },
+  { code: 'GHS06', name: '해골과 뼈', asset: 'assets/ghs/ghs06.svg', exactNames: ['해골과 X자형 뼈', '해골과 뼈', 'skull and crossbones'] },
+  { code: 'GHS07', name: '느낌표', asset: 'assets/ghs/ghs07.svg', exactNames: ['느낌표', 'exclamation mark'] },
+  { code: 'GHS08', name: '건강유해성', asset: 'assets/ghs/ghs08.svg', exactNames: ['건강 유해성', '건강유해성', 'health hazard'] },
+  { code: 'GHS09', name: '환경유해성', asset: 'assets/ghs/ghs09.svg', exactNames: ['환경', '환경 유해성', '환경유해성', 'environment'] }
 ];
 
 const pictogramSources = new Map();
@@ -310,23 +310,43 @@ function findSectionTwoEvidence(extracted) {
     : nextSectionOffset > 0 ? startIndex + nextSectionOffset : Math.min(allPages.length, startIndex + 3);
   const sectionPages = startIndex < 0 ? [] : allPages.slice(startIndex, Math.max(startIndex + 1, endIndex));
   const detected = [];
-  const candidateText = [];
+  const fieldValues = [];
+  const pictogramLabelPattern = /그림문자|픽토그램|pictogram/i;
+  const nextFieldPattern = /^(?:[가-하]\.\s*)?(?:신호어|유해[·ㆍ-]?위험문구|예방조치문구|유해성[·ㆍ-]?위험성\s*분류|분류기준)/i;
 
   sectionPages.forEach((page) => {
     const lines = page.text.split(/\r?\n/).map(cleanLine).filter(Boolean);
     lines.forEach((line, index) => {
-      if (!/그림문자|픽토그램|pictogram/i.test(line)) return;
-      candidateText.push(...lines.slice(index, index + 7));
+      if (!pictogramLabelPattern.test(line)) return;
+      const inlineValue = cleanLine(line.replace(/^.*?(?:그림문자|픽토그램|pictogram)\s*[:：]?\s*/i, ''));
+      if (inlineValue) fieldValues.push({ pageNumber: page.pageNumber, text: inlineValue });
+      for (let offset = 1; offset <= 3 && index + offset < lines.length; offset += 1) {
+        const nextLine = lines[index + offset];
+        if (nextFieldPattern.test(nextLine) || isSectionHeading(nextLine, 3)) break;
+        fieldValues.push({ pageNumber: page.pageNumber, text: nextLine });
+      }
     });
   });
-  const context = candidateText.join(' ');
-  const sectionText = sectionPages.map((page) => page.text).join('\n');
+  const fieldText = fieldValues.map((item) => item.text).join('\n');
+  const exactTokens = fieldText
+    .split(/[\n,，/|;；·ㆍ、]+/)
+    .map((token) => normalized(token.replace(/[()[\]{}]/g, '')))
+    .filter(Boolean);
 
   GHS_PICTOGRAMS.forEach((pictogram) => {
-    const codeFound = new RegExp(`\\b${pictogram.code}\\b`, 'i').test(sectionText);
-    const nameFound = pictogram.aliases.some((alias) => context.toLowerCase().includes(alias.toLowerCase()));
+    const codeMatch = fieldValues.find((item) => new RegExp(`\\b${pictogram.code}\\b`, 'i').test(item.text));
+    const matchedName = pictogram.exactNames.find((name) => exactTokens.includes(normalized(name)));
+    const nameMatch = matchedName && fieldValues.find((item) => normalized(item.text).includes(normalized(matchedName)));
+    const codeFound = Boolean(codeMatch);
+    const nameFound = Boolean(matchedName && nameMatch);
     if (codeFound || nameFound) {
-      detected.push({ ...pictogram, evidence: codeFound ? '코드 명시' : '그림문자 항목 명칭', confidence: codeFound ? '높음' : '중간' });
+      detected.push({
+        ...pictogram,
+        evidence: codeFound
+          ? `MSDS 제2항 그림문자 영역에서 ${pictogram.code} 코드 확인 (${codeMatch.pageNumber}페이지)`
+          : `MSDS 제2항 그림문자 영역에서 표준 명칭 “${matchedName}” 확인 (${nameMatch.pageNumber}페이지)`,
+        confidence: '명시적 근거 확인'
+      });
     }
   });
 
@@ -337,7 +357,7 @@ function findSectionTwoEvidence(extracted) {
     detected,
     imageCount: objectEvidence.reduce((sum, page) => sum + page.imageCount, 0),
     vectorCount: objectEvidence.reduce((sum, page) => sum + page.vectorCount, 0),
-    candidateText: [...new Set(candidateText)].join('\n')
+    candidateText: [...new Set(fieldValues.map((item) => item.text))].join('\n')
   };
 }
 
@@ -379,13 +399,13 @@ function renderSelectedPictograms() {
 
 function applyDetectedPictograms(evidence) {
   pictogramSources.clear();
-  evidence.detected.forEach((pictogram) => pictogramSources.set(pictogram.code, 'MSDS에서 확인됨'));
+  evidence.detected.forEach((pictogram) => pictogramSources.set(pictogram.code, `MSDS에서 확인됨 · 근거: ${pictogram.evidence}`));
   pictogramOptions.querySelectorAll('input').forEach((input) => {
     input.checked = pictogramSources.has(input.value);
   });
   renderSelectedPictograms();
   document.querySelector('#pictogram-detected').textContent = evidence.detected.length
-    ? `2항 텍스트에서 ${evidence.detected.map((item) => `${item.name}(${item.code})`).join(', ')}을 확인했습니다.`
+    ? evidence.detected.map((item) => `${item.code} ${item.name} — 근거: ${item.evidence}`).join(' / ')
     : `텍스트로 그림문자를 확정하지 못했습니다. 이미지 ${evidence.imageCount}개와 벡터 명령 ${evidence.vectorCount}개는 후보 증거이며 임의 매핑하지 않습니다.`;
 }
 
