@@ -24,6 +24,8 @@ const analysisErrorDebug = document.querySelector('#analysis-error-debug');
 const analysisWarning = document.querySelector('#analysis-warning');
 const results = document.querySelector('#results');
 const selectedSizeText = document.querySelector('#selected-size-text');
+const downloadPdfButton = document.querySelector('#download-pdf');
+const pdfDownloadMessage = document.querySelector('#pdf-download-message');
 const rawTextToggle = document.querySelector('#raw-text-toggle');
 const rawTextPanel = document.querySelector('#raw-text-panel');
 const rawTextContent = document.querySelector('#raw-text-content');
@@ -49,6 +51,12 @@ const GHS_PICTOGRAMS = [
   { code: 'GHS08', name: '건강유해성', asset: 'assets/ghs/ghs08.svg', exactNames: ['건강 유해성', '건강유해성', 'health hazard'] },
   { code: 'GHS09', name: '환경유해성', asset: 'assets/ghs/ghs09.svg', exactNames: ['환경', '환경 유해성', '환경유해성', 'environment'] }
 ];
+
+const RECOMMENDED_LABEL_SIZES = {
+  소형: { width: 90, height: 120 },
+  중형: { width: 120, height: 160 },
+  대형: { width: 150, height: 200 }
+};
 
 const pictogramSources = new Map();
 const pictogramCandidates = new Map();
@@ -118,6 +126,30 @@ function hasValidSize() {
   return Number(customWidth.value) > 0 && Number(customHeight.value) > 0;
 }
 
+function getSelectedLabelSize() {
+  const selectedSize = document.querySelector('input[name="label-size"]:checked');
+  if (!selectedSize) return null;
+  if (selectedSize.value === 'custom') {
+    const width = Number(customWidth.value);
+    const height = Number(customHeight.value);
+    return width > 0 && height > 0 ? { name: '직접 입력', width, height } : null;
+  }
+  const recommended = RECOMMENDED_LABEL_SIZES[selectedSize.value];
+  return recommended ? { name: selectedSize.value, ...recommended } : null;
+}
+
+function applyLabelSizeVariables(label, size) {
+  label.style.setProperty('--label-width-mm', `${size.width}mm`);
+  label.style.setProperty('--label-height-mm', `${size.height}mm`);
+}
+
+function refreshSelectedLabelSize() {
+  const size = getSelectedLabelSize();
+  if (!size || results.hidden) return;
+  selectedSizeText.textContent = `${size.name} · ${size.width} × ${size.height} mm`;
+  applyLabelSizeVariables(document.querySelector('.warning-label'), size);
+}
+
 function updateAnalyzeButton() {
   analyzeButton.disabled = isAnalyzing || !(selectedFile && hasValidSize());
 }
@@ -150,9 +182,13 @@ sizeInputs.forEach((input) => {
   input.addEventListener('change', () => {
     customSize.hidden = input.value !== 'custom';
     updateAnalyzeButton();
+    refreshSelectedLabelSize();
   });
 });
-[customWidth, customHeight].forEach((input) => input.addEventListener('input', updateAnalyzeButton));
+[customWidth, customHeight].forEach((input) => input.addEventListener('input', () => {
+  updateAnalyzeButton();
+  refreshSelectedLabelSize();
+}));
 
 const CIRCLED_ITEM_PATTERN = /^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]\s*/;
 const LIST_ITEM_PATTERN = /^(?:(?:[가-하]|\d{1,2})\s*[.)·]\s*|[()（]\s*(?:[가-하]|\d{1,2})\s*[)）]\s*)/;
@@ -1599,18 +1635,10 @@ analyzeButton.addEventListener('click', async () => {
     showPictogramDebug(pictogramEvidence);
     rawTextContent.textContent = rawText || '(추출된 텍스트가 없습니다.)';
     rawTextSummary.textContent = `${extracted.pageCount}페이지 · ${diagnostics.totalLength.toLocaleString('ko-KR')}자`;
-    const selectedSize = document.querySelector('input[name="label-size"]:checked');
-    selectedSizeText.textContent = selectedSize.value === 'custom'
-      ? `${customWidth.value} × ${customHeight.value} mm`
-      : `${selectedSize.value} 선택됨`;
+    const selectedSize = getSelectedLabelSize();
+    selectedSizeText.textContent = `${selectedSize.name} · ${selectedSize.width} × ${selectedSize.height} mm`;
     const warningLabel = document.querySelector('.warning-label');
-    if (selectedSize.value === 'custom') {
-      warningLabel.style.setProperty('--label-width-mm', `${customWidth.value}mm`);
-      warningLabel.style.setProperty('--label-height-mm', `${customHeight.value}mm`);
-    } else {
-      warningLabel.style.removeProperty('--label-width-mm');
-      warningLabel.style.removeProperty('--label-height-mm');
-    }
+    applyLabelSizeVariables(warningLabel, selectedSize);
     results.hidden = false;
     if (diagnostics.isLikelyScanned) {
       analysisWarning.textContent = '텍스트를 충분히 추출하지 못했습니다. 이미지형 또는 스캔형 MSDS일 수 있습니다.';
@@ -1663,6 +1691,144 @@ document.querySelectorAll('.preview-source').forEach((input) => {
 renderPictogramControls();
 renderSelectedPictograms();
 
+function safePdfFilename(productName) {
+  const safeName = productName
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+    .replace(/[.\s]+$/g, '')
+    .trim()
+    .slice(0, 80);
+  return safeName ? `경고표지_${safeName}.pdf` : '경고표지.pdf';
+}
+
+function fitPdfLabelContent(label) {
+  const scalableElements = [...label.querySelectorAll([
+    '.warning-label-title', '.preview-product', '.preview-pictograms img',
+    '.signal-block > strong', '.preview-signal',
+    '.preview-hazard-section > strong', '.preview-precaution-section > strong',
+    '.preview-hazard-section p', '.precaution-group h4', '.precaution-group p',
+    '.preview-supplier', '.preview-supplier strong'
+  ].join(','))];
+  const originalFontSizes = scalableElements.map((element) => parseFloat(getComputedStyle(element).fontSize));
+  const hazardSection = label.querySelector('.preview-hazard-section');
+  const precautionSection = label.querySelector('.preview-precaution-section');
+  const supplier = label.querySelector('.preview-supplier');
+  const symbolSignal = label.querySelector('.preview-symbol-signal');
+  let factor = 1;
+  const applyFactor = () => {
+    scalableElements.forEach((element, index) => {
+      if (element.matches('.preview-pictograms img')) {
+        element.style.width = `${Math.max(42, originalFontSizes[index] * 5.5 * factor)}px`;
+      } else {
+        element.style.fontSize = `${Math.max(9, originalFontSizes[index] * factor)}px`;
+      }
+    });
+    const sectionPadding = Math.max(7, 15 * factor);
+    hazardSection.style.padding = `${sectionPadding}px ${Math.max(9, 18 * factor)}px`;
+    precautionSection.style.padding = `${sectionPadding}px ${Math.max(9, 18 * factor)}px`;
+    supplier.style.padding = `${Math.max(6, 11 * factor)}px ${Math.max(8, 16 * factor)}px`;
+    symbolSignal.style.minHeight = `${Math.max(82, 145 * factor)}px`;
+  };
+  applyFactor();
+  while (label.scrollHeight > label.clientHeight + 1 && factor > 0.55) {
+    factor = Math.max(0.55, factor - 0.05);
+    applyFactor();
+  }
+  return { fits: label.scrollHeight <= label.clientHeight + 1, scale: factor };
+}
+
+async function createPdfRenderClone(size) {
+  const source = document.querySelector('.warning-label');
+  const clone = source.cloneNode(true);
+  const logicalWidth = 720;
+  const logicalHeight = Math.max(320, Math.round(logicalWidth * size.height / size.width));
+  clone.removeAttribute('id');
+  clone.classList.add('pdf-render-label');
+  clone.style.width = `${logicalWidth}px`;
+  clone.style.height = `${logicalHeight}px`;
+  clone.style.overflow = 'hidden';
+  clone.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+  const pictogramArea = clone.querySelector('.preview-pictograms');
+  const selectedPictograms = pictogramArea.querySelectorAll('img');
+  if (!selectedPictograms.length) {
+    pictogramArea.remove();
+    const symbolSignal = clone.querySelector('.preview-symbol-signal');
+    symbolSignal.style.gridTemplateColumns = '1fr';
+  } else {
+    clone.querySelector('.no-pictogram')?.remove();
+  }
+  document.body.append(clone);
+  await document.fonts?.ready;
+  await Promise.all([...clone.querySelectorAll('img')].map((image) => image.decode?.().catch(() => undefined)));
+  return { clone, logicalWidth, logicalHeight, fit: fitPdfLabelContent(clone) };
+}
+
+async function downloadWarningLabelPdf() {
+  const size = getSelectedLabelSize();
+  pdfDownloadMessage.hidden = true;
+  pdfDownloadMessage.className = 'pdf-download-message';
+  if (!size) {
+    pdfDownloadMessage.textContent = '출력 크기를 먼저 선택해 주세요.';
+    pdfDownloadMessage.classList.add('error');
+    pdfDownloadMessage.hidden = false;
+    return;
+  }
+  if (!window.html2canvas || !window.jspdf?.jsPDF) {
+    pdfDownloadMessage.textContent = 'PDF 생성 도구를 불러오지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.';
+    pdfDownloadMessage.classList.add('error');
+    pdfDownloadMessage.hidden = false;
+    return;
+  }
+  downloadPdfButton.disabled = true;
+  downloadPdfButton.textContent = 'PDF 생성 중...';
+  let renderClone;
+  try {
+    renderClone = await createPdfRenderClone(size);
+    if (!renderClone.fit.fits) {
+      throw new Error('선택한 크기에 비해 문구가 너무 많아 내용이 잘릴 수 있습니다. 더 큰 출력 크기를 선택하거나 문구 배치를 확인해 주세요.');
+    }
+    const targetWidthPixels = size.width / 25.4 * 300;
+    const targetHeightPixels = size.height / 25.4 * 300;
+    const renderScale = Math.min(
+      targetWidthPixels / renderClone.logicalWidth,
+      targetHeightPixels / renderClone.logicalHeight,
+      5000 / Math.max(renderClone.logicalWidth, renderClone.logicalHeight)
+    );
+    const canvas = await window.html2canvas(renderClone.clone, {
+      backgroundColor: '#ffffff',
+      logging: false,
+      scale: renderScale,
+      useCORS: true,
+      width: renderClone.logicalWidth,
+      height: renderClone.logicalHeight,
+      windowWidth: renderClone.logicalWidth,
+      windowHeight: renderClone.logicalHeight
+    });
+    const orientation = size.width > size.height ? 'landscape' : 'portrait';
+    const pdf = new window.jspdf.jsPDF({ orientation, unit: 'mm', format: [size.width, size.height], compress: true });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    if (Math.abs(pageWidth - size.width) > 0.02 || Math.abs(pageHeight - size.height) > 0.02) {
+      throw new Error('선택한 출력 크기로 PDF 페이지를 만들지 못했습니다. 크기 값을 확인해 주세요.');
+    }
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, size.width, size.height, undefined, 'FAST');
+    const productName = document.querySelector('#product-name').value;
+    pdf.save(safePdfFilename(productName));
+    pdfDownloadMessage.textContent = `${size.width} × ${size.height} mm PDF를 생성했습니다.`;
+    pdfDownloadMessage.hidden = false;
+  } catch (error) {
+    console.error('경고표지 PDF 생성 오류:', error);
+    pdfDownloadMessage.textContent = error?.message || 'PDF 생성 중 오류가 발생했습니다.';
+    pdfDownloadMessage.classList.add('error');
+    pdfDownloadMessage.hidden = false;
+  } finally {
+    renderClone?.clone.remove();
+    downloadPdfButton.disabled = false;
+    downloadPdfButton.textContent = 'PDF 다운로드';
+  }
+}
+
+downloadPdfButton.addEventListener('click', downloadWarningLabelPdf);
+
 // 직접 입력 크기는 인쇄 직전에 실제 mm 단위로 적용하고, 최소 9px까지 문구를 맞춘다.
 let printStyleBackup = null;
 window.addEventListener('beforeprint', () => {
@@ -1675,10 +1841,10 @@ window.addEventListener('beforeprint', () => {
     overflow: warningLabel.style.overflow,
     fontSizes: [...paragraphs].map((paragraph) => paragraph.style.fontSize)
   };
-  const selectedSize = document.querySelector('input[name="label-size"]:checked');
-  if (selectedSize?.value === 'custom') {
-    warningLabel.style.width = `${customWidth.value}mm`;
-    warningLabel.style.height = `${customHeight.value}mm`;
+  const selectedSize = getSelectedLabelSize();
+  if (selectedSize) {
+    warningLabel.style.width = `${selectedSize.width}mm`;
+    warningLabel.style.height = `${selectedSize.height}mm`;
     warningLabel.style.minHeight = '0';
   }
   let fontSize = 11;

@@ -167,6 +167,10 @@ h1 { margin-bottom: 14px; color: var(--navy); font-size: clamp(34px, 5vw, 50px);
 .preview-supplier span { min-width: 0; overflow-wrap: anywhere; }
 .empty-value { color: #8a8a8a; }
 .preview-note { margin: 13px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.pdf-download-button { margin-top: 14px; }
+.pdf-download-message { margin: 9px 0 0; color: var(--muted); font-size: 11px; }
+.pdf-download-message.error { color: var(--red); }
+.pdf-render-label { position: fixed !important; z-index: -1; top: 0; left: -10000px; min-height: 0 !important; margin: 0; }
 .diagnostics-section { margin-top: 32px; padding: 20px; border: 1px solid #dce6ea; border-radius: 12px; background: #f8fbfc; }
 .diagnostics-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 15px; }
 .diagnostics-heading > div { display: flex; align-items: center; gap: 9px; }
