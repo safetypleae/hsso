@@ -150,27 +150,122 @@ sizeInputs.forEach((input) => {
 });
 [customWidth, customHeight].forEach((input) => input.addEventListener('input', updateAnalyzeButton));
 
-// PDF 텍스트 항목의 좌표를 이용해 사람이 읽는 줄에 가깝게 재구성한다.
-function buildPageText(items) {
+const CIRCLED_ITEM_PATTERN = /^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]\s*/;
+const LIST_ITEM_PATTERN = /^(?:(?:[가-하]|\d{1,2})\s*[.)·]\s*|[()（]\s*(?:[가-하]|\d{1,2})\s*[)）]\s*)/;
+
+function stripListMarker(value) {
+  return value.replace(CIRCLED_ITEM_PATTERN, '').replace(LIST_ITEM_PATTERN, '').trim();
+}
+
+function compactLabelText(value) {
+  return stripListMarker(value).replace(/[\s|:：/·ㆍ・()（）\-]/g, '').toLowerCase();
+}
+
+const LABEL_FAMILIES = [
+  { canonical: '제품명', pattern: /^(?:제품명|제품의명칭|화학제품명|상품명|물질명)/ },
+  { canonical: '그림문자', pattern: /^(?:그림문자|픽토그램|pictogram)/i },
+  { canonical: '신호어', pattern: /^신호어/ },
+  { canonical: '공급자정보', pattern: /^(?:(?:공급자|유통업자|유통자|제조자)(?:유통업자|유통자)?정보|공급자유통업자정보)/ },
+  { canonical: '공급자', pattern: /^(?:공급회사명|공급자명|유통회사명|유통업자명|제조회사명|제조사명|회사명|제조자명|공급자|유통업자|제조자)/ },
+  { canonical: '연락처', pattern: /^(?:긴급연락전화번호|긴급전화번호|긴급연락전화|긴급전화|전화번호|연락처|전화|tel)/i }
+];
+
+function identifyKnownLabel(value) {
+  const compact = compactLabelText(value);
+  return LABEL_FAMILIES.find((definition) => definition.pattern.test(compact)) || null;
+}
+
+function normalizeKnownLabelLine(value) {
+  const source = cleanLine(value);
+  const markerless = stripListMarker(source);
+  const spacedLabelPatterns = [
+    { canonical: '제품명', pattern: /^(?:제\s*품\s*명|제품의\s*명칭|화학\s*제품명|상\s*품\s*명|물\s*질\s*명)(?=\s|[|:：]|$)/i },
+    { canonical: '그림문자', pattern: /^(?:그\s*림\s*문\s*자|픽토그램|pictogram)(?=\s|[|:：]|$)/i },
+    { canonical: '신호어', pattern: /^신\s*호\s*어(?=\s|[|:：]|$)/i },
+    { canonical: '공급자정보', pattern: /^(?:공\s*급\s*자\s*(?:\/|\||및)?\s*(?:유\s*통\s*(?:업\s*)?자)?\s*정\s*보|공\s*급\s*자\s*\/\s*유\s*통\s*업\s*자\s*정\s*보)(?=\s|[|:：]|$)/i },
+    { canonical: '공급자', pattern: /^(?:공급회사명|공급자명|유통회사명|유통업자명|제조회사명|제조사명|회사명|제조자명|공\s*급\s*자|유\s*통\s*업\s*자|제\s*조\s*자)(?=\s|[|:：]|$)/i },
+    { canonical: '연락처', pattern: /^(?:긴급\s*(?:연락\s*)?전화(?:\s*번호)?|전화\s*번호|연\s*락\s*처|전화|tel\.?)\s*(?=\s|[|:：]|$)/i }
+  ];
+  const directMatch = spacedLabelPatterns.map((definition) => ({ definition, match: markerless.match(definition.pattern) })).find((candidate) => candidate.match);
+  if (directMatch) {
+    const remainder = markerless.slice(directMatch.match[0].length).replace(/^(?:\s*[|:：]\s*)+/, '').trim();
+    return remainder ? `${directMatch.definition.canonical} | ${remainder}` : directMatch.definition.canonical;
+  }
+  const cells = markerless.split(/\s*\|\s*/).filter(Boolean);
+  for (let count = Math.min(4, cells.length); count >= 1; count -= 1) {
+    const labelSource = cells.slice(0, count).join(' ');
+    const definition = identifyKnownLabel(labelSource);
+    if (!definition) continue;
+    const compact = compactLabelText(labelSource);
+    const match = compact.match(definition.pattern);
+    if (!match || match[0].length !== compact.length) continue;
+    const valueText = cells.slice(count).join(' | ').trim();
+    return valueText ? `${definition.canonical} | ${valueText}` : definition.canonical;
+  }
+  return source;
+}
+
+function estimateFontSize(item) {
+  const transform = Array.isArray(item.transform) ? item.transform : [1, 0, 0, 1, 0, 0];
+  return Math.abs(Number(item.height)) || Math.hypot(Number(transform[2]) || 0, Number(transform[3]) || 0) || Math.hypot(Number(transform[0]) || 0, Number(transform[1]) || 0) || 0;
+}
+
+// 기존 문자열 결과와 함께 PDF.js 원본 item 및 좌표 기반 행/셀 구조를 보존한다.
+function buildPageStructure(items, pageNumber) {
   const textItems = items
     .filter((item) => typeof item.str === 'string' && item.str.trim())
-    .map((item) => ({ text: item.str.trim(), x: item.transform[4], y: item.transform[5] }))
-    .sort((a, b) => Math.abs(b.y - a.y) > 3 ? b.y - a.y : a.x - b.x);
-  const lines = [];
+    .map((item, itemIndex) => ({
+      page: pageNumber,
+      text: item.str,
+      x: Number(item.transform?.[4]) || 0,
+      y: Number(item.transform?.[5]) || 0,
+      width: Math.abs(Number(item.width)) || 0,
+      height: Math.abs(Number(item.height)) || estimateFontSize(item),
+      fontSize: estimateFontSize(item),
+      itemIndex,
+      raw: item
+    }))
+    .filter((item, index, allItems) => allItems.findIndex((candidate) => candidate.text === item.text && Math.abs(candidate.x - item.x) < 0.5 && Math.abs(candidate.y - item.y) < 0.5) === index)
+    .sort((a, b) => b.y - a.y || a.x - b.x || a.itemIndex - b.itemIndex);
+  const rows = [];
   textItems.forEach((item) => {
-    let line = lines.find((candidate) => Math.abs(candidate.y - item.y) <= 3);
-    if (!line) {
-      line = { y: item.y, items: [] };
-      lines.push(line);
+    const tolerance = Math.max(2, Math.min(5, item.fontSize * 0.35 || 3));
+    let row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= Math.max(candidate.tolerance, tolerance));
+    if (!row) {
+      row = { page: pageNumber, y: item.y, tolerance, items: [] };
+      rows.push(row);
     }
-    line.items.push(item);
+    row.items.push(item);
+    row.y = row.items.reduce((sum, current) => sum + current.y, 0) / row.items.length;
+    row.tolerance = Math.max(row.tolerance, tolerance);
   });
-  return lines
-    .sort((a, b) => b.y - a.y)
-    .map((line) => line.items.sort((a, b) => a.x - b.x).map((item) => item.text).join(' '))
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join('\n');
+  rows.sort((a, b) => b.y - a.y).forEach((row, rowIndex) => {
+    row.items.sort((a, b) => a.x - b.x || a.itemIndex - b.itemIndex);
+    const cells = [];
+    row.items.forEach((item) => {
+      const previous = cells.at(-1)?.items.at(-1);
+      const gap = previous ? item.x - (previous.x + previous.width) : 0;
+      const cellThreshold = Math.max(12, (previous?.fontSize || item.fontSize || 8) * 1.6);
+      if (!cells.length || gap > cellThreshold) cells.push({ items: [] });
+      cells.at(-1).items.push(item);
+    });
+    cells.forEach((cell) => {
+      cell.x = cell.items[0].x;
+      cell.width = Math.max(...cell.items.map((item) => item.x + item.width)) - cell.x;
+      cell.rawText = cell.items.map((item) => item.text).join(' ').replace(/\s+/g, ' ').trim();
+    });
+    row.rowNumber = rowIndex + 1;
+    row.cells = cells;
+    row.rawText = cells.map((cell) => cell.rawText).join(' | ');
+    row.normalizedText = normalizeKnownLabelLine(normalizeCodesInText(row.rawText).normalized);
+    row.text = row.normalizedText;
+  });
+  const text = rows.map((row) => row.text).filter(Boolean).join('\n');
+  return { pageNumber, items: textItems, rawItems: items, rows, text };
+}
+
+function buildPageText(items, pageNumber = 1) {
+  return buildPageStructure(items, pageNumber).text;
 }
 
 async function extractPdfText(file) {
@@ -179,6 +274,7 @@ async function extractPdfText(file) {
   const pdf = await loadingTask.promise;
   const pageCount = pdf.numPages;
   const pages = [];
+  const pageStructures = [];
   const pageObjects = [];
   progressTitle.textContent = `총 ${pageCount}페이지를 확인했습니다.`;
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
@@ -186,7 +282,9 @@ async function extractPdfText(file) {
     try {
       const page = await pdf.getPage(pageNumber);
       const textContent = await page.getTextContent({ includeMarkedContent: false });
-      pages.push(buildPageText(textContent.items));
+      const pageStructure = buildPageStructure(textContent.items, pageNumber);
+      pageStructures.push(pageStructure);
+      pages.push(pageStructure.text);
       const operatorList = await page.getOperatorList();
       const imageOperators = new Set([
         pdfjsLib.OPS.paintImageXObject,
@@ -206,7 +304,7 @@ async function extractPdfText(file) {
     }
   }
   await pdf.destroy();
-  return { pageCount, pages, pageObjects };
+  return { pageCount, pages, pageStructures, pageObjects };
 }
 
 function cleanLine(line) {
@@ -215,6 +313,37 @@ function cleanLine(line) {
 
 function normalized(line) {
   return line.replace(/\s+/g, '').replace(/[ㆍ·・]/g, '·').toLowerCase();
+}
+
+function normalizeCodesInText(value) {
+  const matches = [];
+  const normalizedValue = value.replace(/\b([HP])\s*(\d(?:\s*\d){2})(?=(?:\s*\+\s*[HP]\s*\d)|\b|\s|[.,;:：)）])/gi, (original, prefix, digits) => {
+    const code = `${prefix.toUpperCase()}${digits.replace(/\s/g, '')}`;
+    matches.push({ original, normalized: code });
+    return code;
+  }).replace(/\s*\+\s*(?=[HP]\d{3}\b)/gi, '+');
+  return { original: value, normalized: normalizedValue, matches };
+}
+
+const PHONE_PATTERN = /(?<!\d)(?:\+?82\s*[-)]?\s*)?(?:\(\s*)?0\d{1,2}\s*\)?\s*(?:-|\s)\s*\d{3,4}\s*(?:-|\s)\s*\d{4}(?!\d)/;
+
+function normalizePhone(raw) {
+  const value = raw.trim().replace(/\s+/g, ' ');
+  const hasKoreaPrefix = /^\+?82/.test(value);
+  const localValue = hasKoreaPrefix ? value.replace(/^\+?82\s*[-)]?\s*/, '0') : value;
+  const separated = localValue.replace(/[()]/g, '').split(/\s*-\s*|\s+/).filter(Boolean);
+  if (separated.length === 3 && /^0\d{1,2}$/.test(separated[0]) && /^\d{3,4}$/.test(separated[1]) && /^\d{4}$/.test(separated[2])) return separated.join('-');
+  const digits = localValue.replace(/\D/g, '');
+  const areaLength = digits.startsWith('02') ? 2 : 3;
+  const match = digits.match(new RegExp(`^(0\\d{${areaLength - 1}})(\\d{3,4})(\\d{4})$`));
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+}
+
+function extractPhone(value) {
+  const match = value.match(PHONE_PATTERN);
+  if (!match) return null;
+  const normalizedPhone = normalizePhone(match[0]);
+  return normalizedPhone ? { original: match[0], normalized: normalizedPhone } : null;
 }
 
 function isSectionHeading(line, number) {
@@ -228,11 +357,26 @@ function isSectionHeading(line, number) {
   return titlePatterns[number]?.test(withoutSectionNumber) || false;
 }
 
-function buildDocumentLines(pages) {
+function buildDocumentLines(source) {
+  const structuredPages = Array.isArray(source?.pageStructures) ? source.pageStructures : null;
+  if (structuredPages?.length) {
+    return structuredPages.flatMap((page) => page.rows.map((row, lineIndex) => ({
+      text: cleanLine(row.normalizedText || row.text || row.rawText),
+      rawText: row.rawText,
+      pageNumber: page.pageNumber,
+      lineNumber: lineIndex + 1,
+      x: row.items[0]?.x ?? 0,
+      y: row.y,
+      width: row.items.length ? Math.max(...row.items.map((item) => item.x + item.width)) - row.items[0].x : 0,
+      height: Math.max(0, ...row.items.map((item) => item.height)),
+      cells: row.cells,
+      items: row.items,
+      source: 'coordinates'
+    })).filter((line) => line.text));
+  }
+  const pages = Array.isArray(source) ? source : source?.pages || [];
   return pages.flatMap((pageText, pageIndex) => pageText.split(/\r?\n/).map((text, lineIndex) => ({
-    text: cleanLine(text),
-    pageNumber: pageIndex + 1,
-    lineNumber: lineIndex + 1
+    text: cleanLine(text), rawText: text, pageNumber: pageIndex + 1, lineNumber: lineIndex + 1, source: 'legacy'
   })).filter((line) => line.text));
 }
 
@@ -271,7 +415,7 @@ function locateMsdsSections(documentLines) {
 }
 
 function isKnownLabel(line) {
-  return /^(?:[가-하]\.?\s*)?(제품명|상품명|물질명|공급자|제조자|회사명|주소|긴급전화|담당부서|신호어|그림문자|유해.*위험문구|유해위험문구|예방조치문구)/.test(normalized(line));
+  return Boolean(identifyKnownLabel(line)) || /^(?:[가-하]\.?\s*)?(주소|담당부서|유해.*위험문구|유해위험문구|예방조치문구)/.test(normalized(line));
 }
 
 function extractCodedStatements(lines, prefix) {
@@ -299,7 +443,7 @@ function isPdfNoiseLine(line, repeatedNoise = new Set()) {
 }
 
 function getPrecautionCategory(line) {
-  const match = line.match(/^(?:[가-하]\.?\s*)?(예방|대응|저장|폐기)(?:\s*[:：-]\s*|\s+(?=P\d{3})|\s*$)/);
+  const match = line.match(/^(?:[가-하]\.?\s*)?(?:예방조치\s*문구\s*\|\s*)?(예방|대응|저장|폐기)(?:\s*[|:：-]\s*|\s+(?=P\d{3})|\s*$)/);
   return match ? match[1] : '';
 }
 
@@ -314,6 +458,244 @@ function findRepeatedPageFurniture(pages) {
     });
   });
   return new Set([...pageOccurrences].filter(([, count]) => count >= 2).map(([line]) => line));
+}
+
+function furnitureFingerprint(value) {
+  const compact = normalized(value)
+    .replace(/(?:page)?\d{1,3}(?:\/|of)\d{1,3}/gi, 'page#/#')
+    .replace(/\d{4}[./-]\d{1,2}[./-]\d{1,2}/g, 'date#')
+    .replace(/(?:revision|rev)\.?\d+(?:\.\d+)*/gi, 'rev#');
+  return compact.replace(/[.,:：()（）\[\]\-_/]/g, '');
+}
+
+function findRepeatedPageFurnitureByPosition(documentLines) {
+  const coordinateLines = documentLines.filter((line) => line.source === 'coordinates' && Number.isFinite(line.y));
+  const pageBounds = new Map();
+  coordinateLines.forEach((line) => {
+    const bounds = pageBounds.get(line.pageNumber) || { min: line.y, max: line.y };
+    bounds.min = Math.min(bounds.min, line.y);
+    bounds.max = Math.max(bounds.max, line.y);
+    pageBounds.set(line.pageNumber, bounds);
+  });
+  const occurrences = new Map();
+  coordinateLines.forEach((line) => {
+    if (/\b[HP]\d{3}\b/i.test(line.text) || getPrecautionCategory(line.text) || [1, 2, 3].some((number) => isSectionHeading(line.text, number))) return;
+    const bounds = pageBounds.get(line.pageNumber);
+    const span = Math.max(1, bounds.max - bounds.min);
+    const position = (line.y - bounds.min) / span;
+    const zone = position >= 0.82 ? 'top' : position <= 0.18 ? 'bottom' : '';
+    if (!zone) return;
+    const fingerprint = furnitureFingerprint(line.text);
+    if (!fingerprint || fingerprint.length < 2) return;
+    const key = `${zone}:${fingerprint}`;
+    const entries = occurrences.get(key) || [];
+    if (!entries.some((entry) => entry.pageNumber === line.pageNumber)) entries.push({ ...line, position, fingerprint, zone });
+    occurrences.set(key, entries);
+  });
+  const pageCount = pageBounds.size;
+  const minimumPages = Math.max(2, Math.ceil(pageCount * 0.3));
+  const keys = new Set();
+  const removedRows = [];
+  occurrences.forEach((entries, key) => {
+    if (entries.length < minimumPages) return;
+    const positions = entries.map((entry) => entry.position);
+    if (Math.max(...positions) - Math.min(...positions) > 0.08) return;
+    keys.add(key);
+    removedRows.push(...entries);
+  });
+  return {
+    keys,
+    removedRows,
+    isFurniture(line) {
+      if (line.source !== 'coordinates' || !Number.isFinite(line.y)) return false;
+      const bounds = pageBounds.get(line.pageNumber);
+      if (!bounds) return false;
+      const span = Math.max(1, bounds.max - bounds.min);
+      const position = (line.y - bounds.min) / span;
+      const zone = position >= 0.82 ? 'top' : position <= 0.18 ? 'bottom' : '';
+      return zone ? keys.has(`${zone}:${furnitureFingerprint(line.text)}`) : false;
+    }
+  };
+}
+
+function stripStatementPrefix(value, matchIndex) {
+  return cleanLine(value.slice(matchIndex)).replace(/^\|\s*/, '').replace(/\s*\|\s*/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function isStatementBoundary(line) {
+  const value = cleanLine(line).replace(/\s*\|\s*/g, ' ');
+  const markerless = stripListMarker(value);
+  return CIRCLED_ITEM_PATTERN.test(value) || LIST_ITEM_PATTERN.test(value) || [1, 2, 3].some((number) => isSectionHeading(value, number)) || Boolean(getPrecautionCategory(value)) || /^(?:유해[·ㆍ-]?위험문구|예방조치\s*문구|신호어|그림문자|픽토그램|유해성?\s*[·ㆍ-]?\s*위험성?\s*분류|분류기준|nfpa\s*등급)/i.test(markerless);
+}
+
+function statementKey(statement) {
+  return `${statement.code}\u0000${normalized(statement.finalText).replace(/[.,:：;()（）]/g, '')}`;
+}
+
+function parseStructuredStatements(sectionLines, prefix, furniture) {
+  const codePattern = prefix === 'H' ? /\bH\d{3}\b/i : /\bP\d{3}(?:\+P\d{3})*\b/i;
+  const anyCodePattern = /\b[HP]\d{3}(?:\+P\d{3})*\b/i;
+  const statements = [];
+  let current = null;
+
+  function saveCurrent() {
+    if (!current) return;
+    current.finalText = current.fragments.join(' ').replace(/\s+/g, ' ').replace(/\s+([.,;:：)）])/g, '$1').trim();
+    current.originalText = current.originalFragments.join('\n').trim();
+    delete current.fragments;
+    delete current.originalFragments;
+    if (current.finalText) statements.push(current);
+    current = null;
+  }
+
+  sectionLines.forEach((line, sectionIndex) => {
+    if (furniture.isFurniture(line) || isPdfNoiseLine(line.text)) return;
+    const text = cleanLine(line.text);
+    const codeMatch = text.match(codePattern);
+    const otherCodeMatch = text.match(anyCodePattern);
+    if (codeMatch) {
+      saveCurrent();
+      const sourceText = stripStatementPrefix(text, codeMatch.index);
+      current = {
+        code: codeMatch[0].toUpperCase(),
+        finalText: '',
+        originalText: '',
+        page: line.pageNumber,
+        sourceRows: [{ page: line.pageNumber, line: line.lineNumber, x: line.x, y: line.y, text: line.text, rawText: line.rawText }],
+        startLine: line,
+        sectionIndex,
+        fragments: [sourceText],
+        originalFragments: [line.rawText || line.text],
+        confidence: '높음'
+      };
+      return;
+    }
+    if (!current) return;
+    const inlineBoundary = text.match(/(?:^|\s)(?:예방|대응|저장|폐기)\s*(?:\||:：)?\s*해당\s*없음(?=\s|$)/);
+    if (inlineBoundary) {
+      const leadingText = text.slice(0, inlineBoundary.index).replace(/\s*\|\s*/g, ' ').trim();
+      if (leadingText) {
+        current.fragments.push(leadingText);
+        current.originalFragments.push(line.rawText || line.text);
+        current.sourceRows.push({ page: line.pageNumber, line: line.lineNumber, x: line.x, y: line.y, text: leadingText, rawText: line.rawText });
+      }
+      saveCurrent();
+      return;
+    }
+    const boundaryCellIndex = (line.cells || []).findIndex((cell) => categoryFromCell(cell));
+    if (boundaryCellIndex >= 0) {
+      const leadingText = line.cells.slice(0, boundaryCellIndex).map((cell) => cell.rawText).join(' ').replace(/\s+/g, ' ').trim();
+      if (leadingText) {
+        current.fragments.push(leadingText);
+        current.originalFragments.push(leadingText);
+        current.sourceRows.push({ page: line.pageNumber, line: line.lineNumber, x: line.x, y: line.y, text: leadingText, rawText: line.rawText });
+      }
+      saveCurrent();
+      return;
+    }
+    if (otherCodeMatch || isStatementBoundary(text) || isKnownLabel(text)) {
+      saveCurrent();
+      return;
+    }
+    const continuation = text.replace(/^\|\s*/, '').replace(/\s*\|\s*/g, ' ').trim();
+    if (!continuation) return;
+    current.fragments.push(continuation);
+    current.originalFragments.push(line.rawText || line.text);
+    current.sourceRows.push({ page: line.pageNumber, line: line.lineNumber, x: line.x, y: line.y, text: line.text, rawText: line.rawText });
+  });
+  saveCurrent();
+
+  const seen = new Set();
+  return statements.filter((statement) => {
+    const key = statementKey(statement);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function categoryFromCell(cell) {
+  const value = cleanLine(cell?.rawText || '').replace(/^[가-하]\.?\s*/, '').replace(/[|:：\-]/g, '').trim();
+  const match = value.match(/^(예방|대응|저장|폐기)(?:\s*해당\s*없음)?$/);
+  return match ? match[1] : '';
+}
+
+function collectCategoryAnchors(sectionLines) {
+  const anchors = [];
+  sectionLines.forEach((line, sectionIndex) => {
+    const cells = line.cells || [];
+    cells.forEach((cell, cellIndex) => {
+      const category = categoryFromCell(cell);
+      if (category) anchors.push({ category, page: line.pageNumber, x: cell.x, y: line.y, width: cell.width, sectionIndex, cellIndex, line });
+    });
+    const lineCategory = getPrecautionCategory(line.text);
+    if (lineCategory && !anchors.some((anchor) => anchor.sectionIndex === sectionIndex && anchor.category === lineCategory)) {
+      anchors.push({ category: lineCategory, page: line.pageNumber, x: line.x || 0, y: line.y || 0, width: line.width || 0, sectionIndex, cellIndex: -1, line });
+    }
+  });
+  return anchors;
+}
+
+function categorizeStructuredPrecautions(statements, sectionLines, fallback) {
+  const categories = { 예방: [], 대응: [], 저장: [], 폐기: [] };
+  const uncategorized = [];
+  const anchors = collectCategoryAnchors(sectionLines);
+  const fallbackByCode = new Map();
+  Object.entries(fallback.categories).forEach(([category, values]) => values.forEach((value) => {
+    const code = value.match(/^P\d{3}(?:\+P\d{3})*/i)?.[0];
+    if (code && !fallbackByCode.has(code)) fallbackByCode.set(code, category);
+  }));
+
+  statements.forEach((statement) => {
+    const row = statement.startLine;
+    const rowAnchors = anchors.filter((anchor) => anchor.sectionIndex === statement.sectionIndex);
+    let selected = rowAnchors[0] || null;
+    let confidence = selected ? '높음' : '';
+    if (!selected && Number.isFinite(row.y)) {
+      const pageAnchors = anchors.filter((anchor) => anchor.page === row.pageNumber).sort((a, b) => b.y - a.y);
+      const pageStatementYs = statements.filter((candidate) => candidate.startLine.pageNumber === row.pageNumber).map((candidate) => candidate.startLine.y).filter(Number.isFinite).sort((a, b) => b - a);
+      const rowGaps = pageStatementYs.slice(1).map((value, index) => pageStatementYs[index] - value).filter((gap) => gap > 1 && gap < 50).sort((a, b) => a - b);
+      const rowGap = rowGaps.length ? rowGaps[Math.floor(rowGaps.length / 2)] : 10;
+      const centeredCandidates = pageAnchors.map((anchor, index) => {
+        if (/\bP\d{3}/i.test(anchor.line.text)) return false;
+        if (/해당\s*없음/.test(anchor.line.text)) return false;
+        const previous = pageAnchors[index - 1];
+        const next = pageAnchors[index + 1];
+        const upper = previous ? (previous.y + anchor.y) / 2 + rowGap * 0.75 : Number.POSITIVE_INFINITY;
+        const lower = next ? (anchor.y + next.y) / 2 - rowGap * 1.5 : Number.NEGATIVE_INFINITY;
+        return row.y <= upper && row.y >= lower ? anchor : null;
+      }).filter(Boolean).sort((a, b) => b.sectionIndex - a.sectionIndex);
+      selected = centeredCandidates[0] || null;
+      if (selected) confidence = '중간';
+    }
+    if (!selected) {
+      const sameColumnCandidates = anchors.filter((anchor) => anchor.sectionIndex < statement.sectionIndex && anchor.page === row.pageNumber && Math.abs((anchor.x || 0) - (row.x || 0)) <= Math.max(30, anchor.width || 0))
+        .map((anchor) => ({ anchor, distance: statement.sectionIndex - anchor.sectionIndex }))
+        .sort((a, b) => a.distance - b.distance);
+      if (sameColumnCandidates[0]?.distance <= 12) {
+        selected = sameColumnCandidates[0].anchor;
+        confidence = '중간';
+      }
+    }
+    if (!selected) {
+      selected = [...anchors].reverse().find((anchor) => anchor.sectionIndex < statement.sectionIndex) || null;
+      if (selected) confidence = statement.sectionIndex - selected.sectionIndex <= 15 ? '중간' : '낮음';
+    }
+    if (!selected) {
+      const fallbackCategory = fallbackByCode.get(statement.code);
+      if (fallbackCategory) selected = { category: fallbackCategory };
+      if (selected) confidence = '낮음';
+    }
+    statement.category = selected?.category || '미분류';
+    statement.confidence = confidence || '확인 필요';
+    const target = statement.category === '미분류' ? uncategorized : categories[statement.category];
+    target.push(statement.finalText);
+  });
+  statements.forEach((statement) => {
+    delete statement.startLine;
+    delete statement.sectionIndex;
+  });
+  return { categories, uncategorized, statements, anchors };
 }
 
 function collectCategorizedPrecautions(lines, repeatedNoise = new Set()) {
@@ -337,7 +719,7 @@ function collectCategorizedPrecautions(lines, repeatedNoise = new Set()) {
     if (category) {
       saveStatement();
       currentCategory = category;
-      line = cleanLine(line.replace(/^(?:[가-하]\.?\s*)?(?:예방|대응|저장|폐기)(?:\s*[:：-]\s*|\s+(?=P\d{3})|\s*$)/, ''));
+      line = cleanLine(line.replace(/^(?:[가-하]\.?\s*)?(?:예방조치\s*문구\s*\|\s*)?(?:예방|대응|저장|폐기)(?:\s*[|:：-]\s*|\s+(?=P\d{3})|\s*$)/, ''));
       if (!line) return;
     }
     if (/^P\d{3}(?:\+P\d{3})*\b/i.test(line)) {
@@ -359,96 +741,136 @@ function extractFieldValue(lines, patterns, maxFollowingLines = 2) {
   for (let index = 0; index < lines.length; index += 1) {
     const pattern = patterns.find((candidate) => candidate.test(lines[index]));
     if (!pattern) continue;
-    const inlineValue = cleanLine(lines[index].replace(pattern, ''));
-    if (inlineValue) return inlineValue;
+    const inlineValue = cleanLine(lines[index].replace(pattern, '')).replace(/^(?:\|\s*)+/, '').trim();
+    if (inlineValue) return inlineValue.split(/\s*\|\s*/)[0].trim();
     for (let offset = 1; offset <= maxFollowingLines && index + offset < lines.length; offset += 1) {
       const candidate = cleanLine(lines[index + offset]);
       if (!candidate || isPdfNoiseLine(candidate)) continue;
       if (isKnownLabel(candidate) || isSectionHeading(candidate, 2)) break;
-      return candidate;
+      return candidate.replace(/^(?:\|\s*)+/, '').split(/\s*\|\s*/)[0].trim();
     }
   }
   return '';
 }
 
 function extractSupplierData(lines) {
-  const phonePattern = /(?:\+?82[-\s]?)?(?:0\d{1,2})[-\s)]?\d{3,4}[-\s]?\d{4}/;
   const preferredSupplierPatterns = [
-    /^(?:[가-하]\.?)?\s*(?:유통회사명|공급회사명?|공급자명|유통업자명)\s*[:：]?\s*/i,
-    /^(?:[가-하]\.?)?\s*(?:공급자|유통업자)\s*[:：]\s*/i
+    /^(?:[가-하]\.?)?\s*공급자정보\s*(?:[|:：]\s*)?/i,
+    /^(?:[가-하]\.?)?\s*(?:유통회사명|공급회사명?|공급자명|유통업자명)\s*(?:[|:：]\s*)?/i,
+    /^(?:[가-하]\.?)?\s*(?:공급자|유통업자)(?=\s*[|:：])\s*(?:[|:：]\s*)?/i
   ];
   const manufacturerPatterns = [
-    /^(?:[가-하]\.?)?\s*(?:제조회사명|제조사명|공급자명|유통업자명|회사명|제조자명)\s*[:：]?\s*/i,
-    /^(?:[가-하]\.?)?\s*제조자\s*[:：]\s*/i
+    /^(?:[가-하]\.?)?\s*(?:제조회사명|제조사명|공급자명|유통업자명|회사명|제조자명)\s*(?:[|:：]\s*)?/i,
+    /^(?:[가-하]\.?)?\s*제조자\s*(?:[|:：]\s*)?/i
   ];
   let supplierName = extractFieldValue(lines, preferredSupplierPatterns, 2) || extractFieldValue(lines, manufacturerPatterns, 2);
-  const supplierHeadingIndex = lines.findIndex((line) => /공급자\s*\/?\s*유통업자\s*정보|공급자\s*정보|제조자\s*정보/i.test(line));
+  const invalidSupplier = (value) => !value || /수입품|정보\s*기재|긴급\s*연락\s*가능/i.test(value) || /^(?:정보|배급업자|유통업자|제조자)$/i.test(value);
+  if (invalidSupplier(supplierName)) {
+    supplierName = lines.map((line) => {
+      const match = line.match(/^공급자\s*\|\s*(.+)$/i);
+      return match ? match[1].split(/\s*\|\s*/)[0].trim() : '';
+    }).find((candidate) => !invalidSupplier(candidate)) || '';
+  }
+  const supplierHeadingIndex = lines.findIndex((line) => /공급자\s*\/?\s*유통업자\s*정보|공급자\s*정보|공급자정보|제조자\s*정보/i.test(line));
   if (!supplierName && supplierHeadingIndex >= 0) {
     supplierName = lines.slice(supplierHeadingIndex + 1, supplierHeadingIndex + 10)
       .map(cleanLine)
       .find((line) => line && !isPdfNoiseLine(line) && !/주소|전화|연락처|긴급|담당부서|팩스|fax/i.test(line) && !isKnownLabel(line)) || '';
   }
   supplierName = supplierName
-    .replace(/^(?:공급자\s*\/?\s*유통업자\s*정보|공급자\s*정보|제조회사명|공급자명|회사명)\s*[:：]?\s*/i, '')
+    .replace(/^(?:공급자\s*\/?\s*유통업자\s*정보|공급자\s*정보|공급자정보|제조회사명|공급자명|회사명)\s*(?:[|:：]\s*)?/i, '')
     .split(/(?:주소|전화|연락처|긴급전화|담당부서)\s*[:：]?/i)[0]
-    .replace(phonePattern, '')
+    .replace(PHONE_PATTERN, '')
+    .replace(/^정보\s*\|\s*/i, '')
+    .split(/\s*\|\s*/)[0]
     .trim();
 
   const phoneLabelIndex = lines.findIndex((line) => /긴급(?:연락)?전화(?:번호)?|연락처|전화번호/i.test(line));
   const nearbyPhoneLine = phoneLabelIndex >= 0
-    ? lines.slice(phoneLabelIndex, phoneLabelIndex + 3).find((line) => phonePattern.test(line)) : '';
-  const labelledPhoneLine = lines.find((line) => /긴급(?:연락)?전화(?:번호)?|연락처|전화(?:번호)?|tel\.?/i.test(line) && phonePattern.test(line));
-  const fallbackPhoneLine = lines.find((line) => phonePattern.test(line));
-  const contact = (nearbyPhoneLine || labelledPhoneLine || fallbackPhoneLine || '').match(phonePattern)?.[0]?.trim() || '';
-  return { supplierName, contact };
+    ? lines.slice(phoneLabelIndex, phoneLabelIndex + 3).find((line) => PHONE_PATTERN.test(line)) : '';
+  const labelledPhoneLine = lines.find((line) => /긴급(?:연락)?전화(?:번호)?|연락처|전화(?:번호)?|tel\.?/i.test(line) && PHONE_PATTERN.test(line));
+  const fallbackPhoneLine = lines.find((line) => PHONE_PATTERN.test(line));
+  const phone = extractPhone(nearbyPhoneLine || labelledPhoneLine || fallbackPhoneLine || '');
+  return { supplierName, contact: phone?.normalized || '', contactOriginal: phone?.original || '' };
 }
 
 function formatPrecautionEditor(data) {
   const blocks = Object.entries(data.categories)
     .filter(([, statements]) => statements.length)
     .map(([category, statements]) => `${category}\n${statements.join('\n')}`);
-  if (data.uncategorized.length) blocks.push(data.uncategorized.join('\n'));
+  if (data.uncategorized.length) blocks.push(`미분류\n${data.uncategorized.join('\n')}`);
   return blocks.join('\n\n');
 }
 
 // 명시된 제목·레이블·코드만 사용하며 누락된 내용을 추정하지 않는다.
-function analyzeMsdsText(pages) {
-  const documentLines = buildDocumentLines(pages);
-  const locations = locateMsdsSections(documentLines);
+function analyzeMsdsText(source) {
+  const pages = Array.isArray(source) ? source : source.pages;
+  let documentLines = buildDocumentLines(source);
+  let locations = locateMsdsSections(documentLines);
+  if (!Array.isArray(source) && source.pageStructures?.length && [locations.one, locations.two, locations.three].some((index) => index < 0)) {
+    const legacyLines = buildDocumentLines(pages);
+    const legacyLocations = locateMsdsSections(legacyLines);
+    const structuredCount = [locations.one, locations.two, locations.three].filter((index) => index >= 0).length;
+    const legacyCount = [legacyLocations.one, legacyLocations.two, legacyLocations.three].filter((index) => index >= 0).length;
+    if (legacyCount > structuredCount) {
+      documentLines = legacyLines;
+      locations = legacyLocations;
+    }
+  }
   const repeatedNoise = findRepeatedPageFurniture(pages);
+  const repeatedFurniture = findRepeatedPageFurnitureByPosition(documentLines);
   const sectionOneLines = locations.one >= 0 && locations.two > locations.one
     ? documentLines.slice(locations.one + 1, locations.two) : [];
   const sectionTwoLines = locations.two >= 0
     ? documentLines.slice(locations.two + 1, locations.three > locations.two ? locations.three : documentLines.length) : [];
+  const filteredSectionTwoLines = sectionTwoLines.filter((line) => !repeatedFurniture.isFurniture(line) && !isPdfNoiseLine(line.text, repeatedNoise));
   const cleanSection = (sectionLines) => sectionLines
     .filter((line) => !isPdfNoiseLine(line.text, repeatedNoise))
     .map((line) => line.text);
   const allTextLines = documentLines.map((line) => line.text);
   const productSearch = cleanSection(sectionOneLines).length ? cleanSection(sectionOneLines) : allTextLines;
-  const hazardSearch = cleanSection(sectionTwoLines).length ? cleanSection(sectionTwoLines) : allTextLines;
+  const hazardSearch = filteredSectionTwoLines.length ? filteredSectionTwoLines.map((line) => line.text) : (cleanSection(sectionTwoLines).length ? cleanSection(sectionTwoLines) : allTextLines);
   const itemPrefix = '(?:[가-하]\\.?\\s*)?';
-  const productName = extractFieldValue(productSearch, [new RegExp(`^${itemPrefix}(?:제품명|제품의\\s*명칭|화학제품명|상품명|물질명)\\s*[:：]?\\s*`, 'i')], 2);
+  const productName = extractFieldValue(productSearch, [new RegExp(`^${itemPrefix}(?:제품명|제품의\\s*명칭|화학제품명|상품명|물질명)\\s*(?:[|:：]\\s*)?`, 'i')], 2);
   const supplier = extractSupplierData(productSearch);
   const supplierInfo = [supplier.supplierName, supplier.contact ? `연락처: ${supplier.contact}` : ''].filter(Boolean).join('\n');
-  const signalWord = extractFieldValue(hazardSearch, [new RegExp(`^${itemPrefix}신호어\\s*[:：]?\\s*`, 'i')], 1);
-  const hStatements = extractCodedStatements(hazardSearch, 'H');
-  const categorizedPrecautions = collectCategorizedPrecautions(hazardSearch, repeatedNoise);
+  const signalWord = extractFieldValue(hazardSearch, [new RegExp(`^${itemPrefix}신호어\\s*(?:[|:：]\\s*)?`, 'i')], 1);
+  const legacyHStatements = extractCodedStatements(hazardSearch, 'H');
+  const legacyPrecautions = collectCategorizedPrecautions(hazardSearch, repeatedNoise);
+  const structuredHStatements = filteredSectionTwoLines.length ? parseStructuredStatements(filteredSectionTwoLines, 'H', repeatedFurniture) : [];
+  const structuredPStatements = filteredSectionTwoLines.length ? parseStructuredStatements(filteredSectionTwoLines, 'P', repeatedFurniture) : [];
+  const hStatementRecords = structuredHStatements.length ? structuredHStatements : legacyHStatements.map((text) => ({
+    code: text.match(/^H\d{3}/i)?.[0] || '', finalText: text, originalText: text, page: null, sourceRows: [], confidence: '낮음'
+  }));
+  const categorizedPrecautions = structuredPStatements.length
+    ? categorizeStructuredPrecautions(structuredPStatements, filteredSectionTwoLines, legacyPrecautions)
+    : { ...legacyPrecautions, statements: [], anchors: [] };
   const pictogramText = hazardSearch.filter((line) => /그림문자|픽토그램|pictogram/i.test(line)).join('\n');
   return {
     productName,
     supplierInfo,
     signalWord,
-    hazardStatements: hStatements.join('\n'),
+    hazardStatements: hStatementRecords.map((statement) => statement.finalText).join('\n'),
     precautionStatements: formatPrecautionEditor(categorizedPrecautions),
     pictogramText,
     parserDebug: {
       locations,
       documentLines,
       sectionTwoLines,
-      sectionTwoText: sectionTwoLines.map((line) => line.text).join('\n'),
-      hCodes: hStatements.map((statement) => statement.match(/^H\d{3}/i)?.[0]).filter(Boolean),
+      sectionTwoText: filteredSectionTwoLines.map((line) => line.text).join('\n'),
+      sectionTwoOriginalText: sectionTwoLines.map((line) => line.rawText || line.text).join('\n'),
+      removedFurniture: sectionTwoLines.filter((line) => repeatedFurniture.isFurniture(line)).map((line) => ({
+        page: line.pageNumber, line: line.lineNumber, x: line.x, y: line.y, text: line.text, rawText: line.rawText
+      })),
+      hStatements: hStatementRecords,
+      pStatements: categorizedPrecautions.statements,
+      categoryAnchors: categorizedPrecautions.anchors,
+      hCodes: hStatementRecords.map((statement) => statement.code).filter(Boolean),
       precautionCodes: Object.fromEntries(Object.entries(categorizedPrecautions.categories).map(([category, statements]) => [category, statements.map((statement) => statement.match(/^P\d{3}(?:\+P\d{3})*/i)?.[0]).filter(Boolean)])),
-      supplier
+      supplier,
+      codeNormalizations: documentLines.flatMap((line) => normalizeCodesInText(line.rawText || line.text).matches.map((match) => ({
+        page: line.pageNumber, line: line.lineNumber, ...match
+      })))
     }
   };
 }
@@ -615,6 +1037,10 @@ function showParserDebug(result, extracted) {
   console.info('대응 P-code 목록:', debug.precautionCodes.대응);
   console.info('저장 P-code 목록:', debug.precautionCodes.저장);
   console.info('폐기 P-code 목록:', debug.precautionCodes.폐기);
+  console.info('H문구 출처 추적:', debug.hStatements);
+  console.info('P문구 출처·분류 추적:', debug.pStatements);
+  console.info('좌표 기반 분류 제목:', debug.categoryAnchors);
+  console.info('제거된 반복 머리말·꼬리말 원문:', debug.removedFurniture);
   console.info('공급자명:', debug.supplier.supplierName);
   console.info('연락처:', debug.supplier.contact);
   console.groupEnd();
@@ -741,7 +1167,7 @@ analyzeButton.addEventListener('click', async () => {
     const pictogramEvidence = findSectionTwoEvidence(extracted);
     showDiagnostics(diagnostics);
     logDiagnostics(selectedFile, diagnostics);
-    const analysisResult = analyzeMsdsText(extracted.pages);
+    const analysisResult = analyzeMsdsText(extracted);
     fillAnalysisResult(analysisResult);
     showParserDebug(analysisResult, extracted);
     applyDetectedPictograms(pictogramEvidence);
