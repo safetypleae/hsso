@@ -51,6 +51,10 @@ const GHS_PICTOGRAMS = [
 ];
 
 const pictogramSources = new Map();
+const pictogramCandidates = new Map();
+const pictogramAutomaticGrades = new Map();
+let unresolvedPictogramCount = 0;
+let pictogramEmptyReason = '';
 
 let selectedFile = null;
 let isAnalyzing = false;
@@ -303,8 +307,328 @@ async function extractPdfText(file) {
       throw error;
     }
   }
-  await pdf.destroy();
-  return { pageCount, pages, pageStructures, pageObjects };
+  return { pageCount, pages, pageStructures, pageObjects, pdfDocument: pdf };
+}
+
+const PICTOGRAM_LABEL_PATTERN = /(?:그\s*림\s*문\s*자|픽토그램|pictograms?)/i;
+const PDF_MATRIX_IDENTITY = [1, 0, 0, 1, 0, 0];
+
+function multiplyPdfMatrices(left, right) {
+  return [
+    left[0] * right[0] + left[2] * right[1],
+    left[1] * right[0] + left[3] * right[1],
+    left[0] * right[2] + left[2] * right[3],
+    left[1] * right[2] + left[3] * right[3],
+    left[0] * right[4] + left[2] * right[5] + left[4],
+    left[1] * right[4] + left[3] * right[5] + left[5]
+  ];
+}
+
+function transformedUnitBox(matrix) {
+  const points = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([x, y]) => ({
+    x: matrix[0] * x + matrix[2] * y + matrix[4],
+    y: matrix[1] * x + matrix[3] * y + matrix[5]
+  }));
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+}
+
+function collectPageImageBoxes(operatorList) {
+  const imageOperators = new Map([
+    [pdfjsLib.OPS.paintImageXObject, 'image-xobject'],
+    [pdfjsLib.OPS.paintInlineImageXObject, 'inline-image'],
+    [pdfjsLib.OPS.paintImageMaskXObject, 'image-mask'],
+    [pdfjsLib.OPS.paintSolidColorImageMask, 'solid-image-mask']
+  ]);
+  const boxes = [];
+  const stack = [];
+  let transform = [...PDF_MATRIX_IDENTITY];
+  operatorList.fnArray.forEach((operation, index) => {
+    const args = operatorList.argsArray[index] || [];
+    if (operation === pdfjsLib.OPS.save) {
+      stack.push([...transform]);
+    } else if (operation === pdfjsLib.OPS.restore) {
+      transform = stack.pop() || [...PDF_MATRIX_IDENTITY];
+    } else if (operation === pdfjsLib.OPS.transform && args.length >= 6) {
+      transform = multiplyPdfMatrices(transform, args.slice(0, 6).map(Number));
+    } else if (imageOperators.has(operation)) {
+      boxes.push({
+        ...transformedUnitBox(transform),
+        sourceType: imageOperators.get(operation),
+        operatorIndex: index,
+        objectName: typeof args[0] === 'string' ? args[0] : null
+      });
+    }
+  });
+  return boxes;
+}
+
+function getPictogramLabelRows(analysisResult) {
+  return analysisResult.parserDebug.sectionTwoLines.filter((line) =>
+    PICTOGRAM_LABEL_PATTERN.test(line.rawText || line.text)
+  ).map((line) => {
+    const items = line.items || [];
+    const x = items.length ? Math.min(...items.map((item) => item.x)) : line.x;
+    const right = items.length ? Math.max(...items.map((item) => item.x + item.width)) : x + (line.width || 0);
+    const height = Math.max(line.height || 0, ...items.map((item) => item.height || 0), 8);
+    return {
+      page: line.pageNumber,
+      text: line.rawText || line.text,
+      bbox: { x, y: line.y - height * 0.25, width: right - x, height },
+      explicitlyEmpty: /해당\s*없음|없\s*음|not\s+applicable|none/i.test(line.rawText || line.text)
+    };
+  });
+}
+
+function isSpatialPictogramCandidate(box, label) {
+  const labelRight = label.bbox.x + label.bbox.width;
+  const boxRight = box.x + box.width;
+  const boxTop = box.y + box.height;
+  const labelTop = label.bbox.y + label.bbox.height;
+  const horizontalRelation = boxRight >= label.bbox.x - 8 && box.x <= labelRight + 430;
+  const verticalRelation = boxTop >= label.bbox.y - 75 && box.y <= labelTop + 45;
+  const plausibleSize = box.width >= 18 && box.height >= 18 && box.width <= 120 && box.height <= 120;
+  const aspectRatio = box.width / Math.max(box.height, 0.01);
+  return horizontalRelation && verticalRelation && plausibleSize && aspectRatio >= 0.55 && aspectRatio <= 1.8;
+}
+
+function cropRenderedPage(pageCanvas, viewport, box, scale) {
+  const margin = 3;
+  const rectangle = viewport.convertToViewportRectangle([
+    box.x - margin,
+    box.y - margin,
+    box.x + box.width + margin,
+    box.y + box.height + margin
+  ]);
+  const left = Math.max(0, Math.floor(Math.min(rectangle[0], rectangle[2])));
+  const top = Math.max(0, Math.floor(Math.min(rectangle[1], rectangle[3])));
+  const right = Math.min(pageCanvas.width, Math.ceil(Math.max(rectangle[0], rectangle[2])));
+  const bottom = Math.min(pageCanvas.height, Math.ceil(Math.max(rectangle[1], rectangle[3])));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, right - left);
+  canvas.height = Math.max(1, bottom - top);
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  context.drawImage(pageCanvas, left, top, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let redPixels = 0;
+  let darkPixels = 0;
+  for (let index = 0; index < pixels.length; index += 4) {
+    const red = pixels[index];
+    const green = pixels[index + 1];
+    const blue = pixels[index + 2];
+    if (red > 120 && red > green * 1.3 && red > blue * 1.3) redPixels += 1;
+    if (red < 90 && green < 90 && blue < 90) darkPixels += 1;
+  }
+  const pixelCount = Math.max(1, canvas.width * canvas.height);
+  return {
+    canvas,
+    imageData: canvas.toDataURL('image/png'),
+    width: canvas.width,
+    height: canvas.height,
+    renderScale: scale,
+    redRatio: redPixels / pixelCount,
+    darkRatio: darkPixels / pixelCount
+  };
+}
+
+async function extractSectionTwoPictogramCrops(extracted, analysisResult) {
+  const labels = getPictogramLabelRows(analysisResult);
+  const crops = [];
+  const candidates = [];
+  const scale = 4;
+  for (const pageNumber of [...new Set(labels.filter((label) => !label.explicitlyEmpty).map((label) => label.page))]) {
+    const pageLabels = labels.filter((label) => label.page === pageNumber && !label.explicitlyEmpty);
+    const page = await extracted.pdfDocument.getPage(pageNumber);
+    const operatorList = await page.getOperatorList();
+    const imageBoxes = collectPageImageBoxes(operatorList);
+    const pageCandidates = imageBoxes.filter((box) => pageLabels.some((label) => isSpatialPictogramCandidate(box, label)))
+      .filter((box, index, all) => all.findIndex((other) => Math.abs(other.x - box.x) < 0.5 && Math.abs(other.y - box.y) < 0.5 && Math.abs(other.width - box.width) < 0.5 && Math.abs(other.height - box.height) < 0.5) === index)
+      .sort((left, right) => left.x - right.x || right.y - left.y);
+    candidates.push(...pageCandidates.map((candidate) => ({ page: pageNumber, ...candidate })));
+    if (!pageCandidates.length) continue;
+    const viewport = page.getViewport({ scale });
+    const pageCanvas = document.createElement('canvas');
+    pageCanvas.width = Math.ceil(viewport.width);
+    pageCanvas.height = Math.ceil(viewport.height);
+    await page.render({ canvasContext: pageCanvas.getContext('2d'), viewport }).promise;
+    pageCandidates.forEach((candidate) => {
+      const rendered = cropRenderedPage(pageCanvas, viewport, candidate, scale);
+      const hasPictogramAppearance = rendered.redRatio >= 0.002 && rendered.darkRatio >= 0.002;
+      if (!hasPictogramAppearance) return;
+      crops.push({
+        page: pageNumber,
+        bbox: { x: candidate.x, y: candidate.y, width: candidate.width, height: candidate.height },
+        width: rendered.width,
+        height: rendered.height,
+        detectionConfidence: rendered.redRatio >= 0.01 ? 'high' : 'medium',
+        sourceType: `${candidate.sourceType}+page-render`,
+        cropCanvas: rendered.canvas,
+        cropImageData: rendered.imageData,
+        metrics: { redRatio: rendered.redRatio, darkRatio: rendered.darkRatio, renderScale: rendered.renderScale }
+      });
+    });
+    pageCanvas.width = 1;
+    pageCanvas.height = 1;
+  }
+  return {
+    labelDetected: labels.length > 0,
+    labels,
+    candidateCount: candidates.length,
+    candidates,
+    crops,
+    noPictogram: crops.length === 0
+  };
+}
+
+const PICTOGRAM_COMPARE_SIZE = 128;
+let normalizedGhsTemplatePromise;
+
+function loadCanvasImage(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener('load', () => resolve(image), { once: true });
+    image.addEventListener('error', () => reject(new Error(`그림문자 템플릿을 불러오지 못했습니다: ${source}`)), { once: true });
+    image.src = source;
+  });
+}
+
+function findColorBounds(pixels, width, height, predicate) {
+  let left = width;
+  let top = height;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = (y * width + x) * 4;
+      if (!predicate(pixels[index], pixels[index + 1], pixels[index + 2], pixels[index + 3])) continue;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  return right >= left && bottom >= top ? { left, top, right, bottom, width: right - left + 1, height: bottom - top + 1 } : null;
+}
+
+function normalizePictogramCanvas(source, size = PICTOGRAM_COMPARE_SIZE) {
+  const sourceCanvas = document.createElement('canvas');
+  sourceCanvas.width = source.naturalWidth || source.width;
+  sourceCanvas.height = source.naturalHeight || source.height;
+  const sourceContext = sourceCanvas.getContext('2d', { willReadFrequently: true });
+  sourceContext.fillStyle = '#fff';
+  sourceContext.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+  sourceContext.drawImage(source, 0, 0, sourceCanvas.width, sourceCanvas.height);
+  const sourcePixels = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height).data;
+  const redBounds = findColorBounds(sourcePixels, sourceCanvas.width, sourceCanvas.height,
+    (red, green, blue, alpha) => alpha > 32 && red > 110 && red > green * 1.25 && red > blue * 1.25);
+  const contentBounds = redBounds || findColorBounds(sourcePixels, sourceCanvas.width, sourceCanvas.height,
+    (red, green, blue, alpha) => alpha > 32 && Math.min(red, green, blue) < 220);
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, size, size);
+  if (contentBounds) {
+    const padding = Math.round(size * 0.08);
+    const targetSize = size - padding * 2;
+    context.drawImage(sourceCanvas,
+      contentBounds.left, contentBounds.top, contentBounds.width, contentBounds.height,
+      padding, padding, targetSize, targetSize);
+  }
+  const pixels = context.getImageData(0, 0, size, size).data;
+  const redMask = new Uint8Array(size * size);
+  const blackMask = new Uint8Array(size * size);
+  for (let pixel = 0; pixel < redMask.length; pixel += 1) {
+    const index = pixel * 4;
+    const red = pixels[index];
+    const green = pixels[index + 1];
+    const blue = pixels[index + 2];
+    const isRed = red > 105 && red > green * 1.2 && red > blue * 1.2;
+    redMask[pixel] = isRed ? 1 : 0;
+    blackMask[pixel] = !isRed && (red + green + blue) / 3 < 155 ? 1 : 0;
+  }
+  return { canvas, redMask, blackMask, redBounds, size };
+}
+
+function compareBinaryMasks(reference, candidate, size, offsetX = 0, offsetY = 0) {
+  let intersection = 0;
+  let union = 0;
+  let referenceCount = 0;
+  let candidateCount = 0;
+  let paired = 0;
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const shiftedX = x + offsetX;
+      const shiftedY = y + offsetY;
+      const left = reference[y * size + x];
+      const right = shiftedX >= 0 && shiftedX < size && shiftedY >= 0 && shiftedY < size
+        ? candidate[shiftedY * size + shiftedX] : 0;
+      intersection += left && right ? 1 : 0;
+      union += left || right ? 1 : 0;
+      referenceCount += left;
+      candidateCount += right;
+      paired += left * right;
+    }
+  }
+  const count = size * size;
+  const numerator = paired - (referenceCount * candidateCount) / count;
+  const denominator = Math.sqrt(referenceCount * (1 - referenceCount / count) * candidateCount * (1 - candidateCount / count));
+  return {
+    iou: union ? intersection / union : 0,
+    correlation: denominator ? numerator / denominator : 0
+  };
+}
+
+function bestMaskComparison(reference, candidate, size) {
+  let best = { iou: 0, correlation: -1, score: 0, offsetX: 0, offsetY: 0 };
+  for (let offsetY = -3; offsetY <= 3; offsetY += 1) {
+    for (let offsetX = -3; offsetX <= 3; offsetX += 1) {
+      const metrics = compareBinaryMasks(reference, candidate, size, offsetX, offsetY);
+      const score = metrics.iou * 0.55 + Math.max(0, metrics.correlation) * 0.45;
+      if (score > best.score) best = { ...metrics, score, offsetX, offsetY };
+    }
+  }
+  return best;
+}
+
+async function getNormalizedGhsTemplates() {
+  if (!normalizedGhsTemplatePromise) {
+    normalizedGhsTemplatePromise = Promise.all(GHS_PICTOGRAMS.map(async (pictogram) => {
+      const image = await loadCanvasImage(pictogram.asset);
+      return { code: pictogram.code, name: pictogram.name, ...normalizePictogramCanvas(image) };
+    }));
+  }
+  return normalizedGhsTemplatePromise;
+}
+
+async function comparePictogramCrops(cropDetection) {
+  if (!cropDetection.crops.length) return [];
+  const templates = await getNormalizedGhsTemplates();
+  return cropDetection.crops.map((crop, cropIndex) => {
+    const normalizedCrop = normalizePictogramCanvas(crop.cropCanvas);
+    const scores = templates.map((template) => ({
+      code: template.code,
+      name: template.name,
+      ...bestMaskComparison(template.blackMask, normalizedCrop.blackMask, PICTOGRAM_COMPARE_SIZE)
+    })).sort((left, right) => right.score - left.score);
+    const first = scores[0];
+    const second = scores[1];
+    return {
+      cropIndex: cropIndex + 1,
+      page: crop.page,
+      bbox: crop.bbox,
+      detectionConfidence: crop.detectionConfidence,
+      first: { code: first.code, score: first.score, iou: first.iou, correlation: first.correlation },
+      second: { code: second.code, score: second.score, iou: second.iou, correlation: second.correlation },
+      scoreGap: first.score - second.score,
+      scores,
+      normalizedCanvas: normalizedCrop.canvas
+    };
+  });
 }
 
 function cleanLine(line) {
@@ -941,9 +1265,9 @@ function renderPictogramControls() {
   pictogramOptions.replaceChildren(...GHS_PICTOGRAMS.map((pictogram) => {
     const label = document.createElement('label');
     label.className = 'pictogram-choice';
-    label.innerHTML = `<input type="checkbox" value="${pictogram.code}"><span><img src="${pictogram.asset}" alt=""><b>${pictogram.name}<br>${pictogram.code}</b></span>`;
+    label.innerHTML = `<input type="checkbox" value="${pictogram.code}"><span><img src="${pictogram.asset}" alt=""><b>${pictogram.name}<br>${pictogram.code}<small class="pictogram-card-status" aria-live="polite"></small></b></span>`;
     label.querySelector('input').addEventListener('change', (event) => {
-      if (event.target.checked && !pictogramSources.has(pictogram.code)) pictogramSources.set(pictogram.code, '사용자가 선택함');
+      if (event.target.checked) pictogramSources.set(pictogram.code, '직접 선택');
       if (!event.target.checked) pictogramSources.delete(pictogram.code);
       renderSelectedPictograms();
     });
@@ -953,6 +1277,17 @@ function renderPictogramControls() {
 
 function renderSelectedPictograms() {
   const selected = GHS_PICTOGRAMS.filter((pictogram) => pictogramSources.has(pictogram.code));
+  pictogramOptions.querySelectorAll('.pictogram-choice').forEach((choice) => {
+    const code = choice.querySelector('input').value;
+    const badge = choice.querySelector('.pictogram-card-status');
+    const source = pictogramSources.get(code);
+    const grade = pictogramAutomaticGrades.get(code);
+    badge.textContent = source === '직접 선택'
+      ? '직접 선택'
+      : grade === 'A' ? 'MSDS에서 자동 확인'
+        : pictogramCandidates.has(code) ? '확인 필요' : '';
+    badge.dataset.grade = source === '직접 선택' ? 'manual' : (grade || '');
+  });
   previewPictograms.replaceChildren(...(selected.length
     ? selected.map((pictogram) => {
       const image = document.createElement('img');
@@ -962,30 +1297,117 @@ function renderSelectedPictograms() {
     })
     : [Object.assign(document.createElement('span'), { className: 'no-pictogram', textContent: '확인된 그림문자 없음' })]));
 
-  pictogramResults.replaceChildren(...(selected.length
-    ? selected.map((pictogram) => {
+  const resultRows = selected.map((pictogram) => {
       const row = document.createElement('div');
       row.className = 'identified-pictogram';
       row.innerHTML = `<img src="${pictogram.asset}" alt=""><strong>${pictogram.name} (${pictogram.code})</strong><span>${pictogramSources.get(pictogram.code)}</span>`;
       return row;
-    })
-    : [Object.assign(document.createElement('p'), { textContent: '자동 식별된 그림문자가 없습니다. 원본 MSDS를 확인해 직접 선택해 주세요.' })]));
-  statusPictograms.textContent = selected.length ? `${selected.length}개 선택됨` : '확인 필요';
+    });
+  GHS_PICTOGRAMS.filter((pictogram) => pictogramCandidates.has(pictogram.code) && !pictogramSources.has(pictogram.code)).forEach((pictogram) => {
+    const row = document.createElement('div');
+    row.className = 'identified-pictogram pictogram-candidate';
+    row.innerHTML = `<img src="${pictogram.asset}" alt=""><strong>${pictogram.name} (${pictogram.code})</strong><span>확인 필요</span>`;
+    resultRows.push(row);
+  });
+  if (unresolvedPictogramCount) {
+    resultRows.push(Object.assign(document.createElement('p'), {
+      className: 'pictogram-unresolved',
+      textContent: '자동 판별이 어려운 그림문자가 있습니다. MSDS를 확인해 직접 선택해주세요.'
+    }));
+  }
+  if (!resultRows.length) {
+    const message = pictogramEmptyReason === 'declared-none'
+      ? 'MSDS 그림문자 항목에 해당 없음으로 표시되어 있습니다. 필요한 경우 직접 선택할 수 있습니다.'
+      : pictogramEmptyReason === 'not-found'
+        ? 'MSDS에서 그림문자 영역을 찾지 못했습니다. 원본을 확인해 직접 선택해 주세요.'
+        : '자동 식별된 그림문자가 없습니다. 원본 MSDS를 확인해 직접 선택해 주세요.';
+    resultRows.push(Object.assign(document.createElement('p'), { textContent: message }));
+  }
+  pictogramResults.replaceChildren(...resultRows);
+  statusPictograms.textContent = selected.length
+    ? `${selected.length}개 선택됨`
+    : pictogramCandidates.size || unresolvedPictogramCount ? '확인 필요' : '선택 없음';
+}
+
+function classifyPictogramComparison(comparison) {
+  const reliableCrop = comparison.detectionConfidence === 'high';
+  if (!reliableCrop || comparison.first.score < 0.45 || comparison.scoreGap < 0.10) return 'C';
+  if (comparison.first.score >= 0.65 && comparison.scoreGap >= 0.25) return 'A';
+  return 'B';
 }
 
 function applyDetectedPictograms(evidence) {
   pictogramSources.clear();
-  evidence.detected.forEach((pictogram) => pictogramSources.set(pictogram.code, `MSDS에서 확인됨 · 근거: ${pictogram.evidence}`));
+  pictogramCandidates.clear();
+  pictogramAutomaticGrades.clear();
+  unresolvedPictogramCount = 0;
+  const cropDetection = evidence.cropDetection;
+  const comparisons = cropDetection?.comparisons || [];
+  comparisons.forEach((comparison) => { comparison.grade = classifyPictogramComparison(comparison); });
+  comparisons.filter((comparison) => comparison.grade === 'A').forEach((comparison) => {
+    pictogramAutomaticGrades.set(comparison.first.code, 'A');
+    pictogramSources.set(comparison.first.code, 'MSDS에서 자동 확인');
+  });
+  comparisons.filter((comparison) => comparison.grade === 'B').forEach((comparison) => {
+    if (!pictogramAutomaticGrades.has(comparison.first.code)) {
+      pictogramAutomaticGrades.set(comparison.first.code, 'B');
+      pictogramCandidates.set(comparison.first.code, comparison);
+    }
+  });
+  unresolvedPictogramCount = comparisons.filter((comparison) => comparison.grade === 'C').length;
+  pictogramEmptyReason = cropDetection?.crops.length ? ''
+    : cropDetection?.labels.some((label) => label.explicitlyEmpty) ? 'declared-none' : 'not-found';
   pictogramOptions.querySelectorAll('input').forEach((input) => {
     input.checked = pictogramSources.has(input.value);
   });
   renderSelectedPictograms();
-  document.querySelector('#pictogram-detected').textContent = evidence.detected.length
-    ? evidence.detected.map((item) => `${item.code} ${item.name} — 근거: ${item.evidence}`).join(' / ')
-    : `텍스트로 그림문자를 확정하지 못했습니다. 이미지 ${evidence.imageCount}개와 벡터 명령 ${evidence.vectorCount}개는 후보 증거이며 임의 매핑하지 않습니다.`;
+  const automaticCodes = [...pictogramAutomaticGrades].filter(([, grade]) => grade === 'A').map(([code]) => code);
+  const candidateCodes = [...pictogramCandidates.keys()];
+  document.querySelector('#pictogram-detected').textContent = automaticCodes.length || candidateCodes.length || unresolvedPictogramCount
+    ? [
+      automaticCodes.length ? `MSDS에서 자동 확인: ${automaticCodes.join(', ')}` : '',
+      candidateCodes.length ? `확인 필요: ${candidateCodes.join(', ')}` : '',
+      unresolvedPictogramCount ? `직접 확인 필요: ${unresolvedPictogramCount}개` : ''
+    ].filter(Boolean).join(' / ')
+    : pictogramEmptyReason === 'declared-none'
+      ? 'MSDS에 실제 그림문자가 표시되지 않았습니다.'
+      : '그림문자를 자동으로 확인하지 못했습니다. 원본 MSDS를 확인해 주세요.';
 }
 
 function showPictogramDebug(evidence) {
+  if (evidence.cropDetection) {
+    console.groupCollapsed('[HSSO GHS 그림문자 crop]');
+    console.info('그림문자 라벨 탐지:', evidence.cropDetection.labelDetected);
+    console.info('그림문자 후보 영역 수:', evidence.cropDetection.candidateCount);
+    console.info('그림문자 crop 수:', evidence.cropDetection.crops.length);
+    console.info('그림문자 없음 판단:', evidence.cropDetection.noPictogram);
+    console.table(evidence.cropDetection.crops.map((crop, index) => ({
+      crop: index + 1,
+      page: crop.page,
+      x: Number(crop.bbox.x.toFixed(2)),
+      y: Number(crop.bbox.y.toFixed(2)),
+      width: Number(crop.bbox.width.toFixed(2)),
+      height: Number(crop.bbox.height.toFixed(2)),
+      confidence: crop.detectionConfidence,
+      sourceType: crop.sourceType
+    })));
+    console.info('그림문자 crop 원본 데이터:', evidence.cropDetection.crops);
+    console.table((evidence.cropDetection.comparisons || []).map((comparison) => ({
+      crop: comparison.cropIndex,
+      page: comparison.page,
+      first: comparison.first.code,
+      firstScore: Number(comparison.first.score.toFixed(4)),
+      firstIoU: Number(comparison.first.iou.toFixed(4)),
+      firstCorrelation: Number(comparison.first.correlation.toFixed(4)),
+      second: comparison.second.code,
+      secondScore: Number(comparison.second.score.toFixed(4)),
+      scoreGap: Number(comparison.scoreGap.toFixed(4)),
+      grade: comparison.grade || '',
+      detectionConfidence: comparison.detectionConfidence
+    })));
+    console.info('GHS01~GHS09 전체 비교 점수:', evidence.cropDetection.comparisons || []);
+    console.groupEnd();
+  }
   const pages = evidence.sectionPages.map((page) => page.pageNumber);
   document.querySelector('#debug-section-pages').textContent = pages.length ? `${pages.join(', ')}페이지` : '탐지되지 않음';
   document.querySelector('#debug-image-count').textContent = `${evidence.imageCount}개`;
@@ -1160,14 +1582,17 @@ analyzeButton.addEventListener('click', async () => {
   progressTitle.textContent = 'PDF를 읽고 있습니다.';
   progressDetail.textContent = '파일은 외부 서버로 전송되지 않습니다.';
   analyzeButton.querySelector('span:first-child').textContent = '분석 중...';
+  let extracted;
   try {
-    const extracted = await extractPdfText(selectedFile);
+    extracted = await extractPdfText(selectedFile);
     const rawText = extracted.pages.map((page, index) => `[${index + 1} 페이지]\n${page}`).join('\n\n');
     const diagnostics = buildDiagnostics(extracted);
-    const pictogramEvidence = findSectionTwoEvidence(extracted);
     showDiagnostics(diagnostics);
     logDiagnostics(selectedFile, diagnostics);
     const analysisResult = analyzeMsdsText(extracted);
+    const pictogramEvidence = findSectionTwoEvidence(extracted);
+    pictogramEvidence.cropDetection = await extractSectionTwoPictogramCrops(extracted, analysisResult);
+    pictogramEvidence.cropDetection.comparisons = await comparePictogramCrops(pictogramEvidence.cropDetection);
     fillAnalysisResult(analysisResult);
     showParserDebug(analysisResult, extracted);
     applyDetectedPictograms(pictogramEvidence);
@@ -1204,6 +1629,7 @@ analyzeButton.addEventListener('click', async () => {
     ].filter(Boolean).join('\n');
     analysisErrorDetail.hidden = false;
   } finally {
+    if (extracted?.pdfDocument) await extracted.pdfDocument.destroy();
     isAnalyzing = false;
     analysisProgress.hidden = true;
     analyzeButton.querySelector('span:first-child').textContent = 'MSDS 분석하기';
