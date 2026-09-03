@@ -68,6 +68,8 @@ let previewResizeObserver = null;
 
 let selectedFile = null;
 let isAnalyzing = false;
+let selectedProcessFile = null;
+let isProcessAnalyzing = false;
 
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -2163,6 +2165,601 @@ rawTextToggle.addEventListener('click', () => {
   rawTextToggle.setAttribute('aria-expanded', String(willOpen));
 });
 
+const PROCESS_SECTION_TITLES = {
+  4: /^(?:응급조치(?:요령)?|응급처치(?:요령)?|firstaidmeasures?|healthhazardinformation)$/i,
+  5: /^(?:폭발화재시대처방법|화재시대처방법|소방조치|firefightingmeasures?)$/i,
+  6: /^(?:누출사고시대처방법|누출시대처방법|accidentalreleasemeasures?)$/i,
+  7: /^(?:취급및저장방법|취급저장방법|handlingandstorage)$/i,
+  8: /^(?:노출방지및개인보호구|노출방지개인보호구|노출관리개인보호구|exposurecontrolspersonalprotection)$/i,
+  9: /^(?:물리화학적특성|physicalandchemicalproperties)$/i
+};
+
+function isProcessSectionHeading(line, number) {
+  const value = normalized(line).replace(/[.·ㆍ•:：()\-_/,&]/g, '');
+  if (value.length > 100) return false;
+  const numberPrefix = `(?:제?${number}(?:항|장)?)`;
+  const firstPrefix = value.match(new RegExp(`^${numberPrefix}`))?.[0] || '';
+  if (!firstPrefix) return false;
+  const firstTitle = value.slice(firstPrefix.length);
+  if (PROCESS_SECTION_TITLES[number]?.test(firstTitle)) return true;
+  const repeatedNumber = firstTitle.match(new RegExp(numberPrefix))?.[0] || '';
+  if (!repeatedNumber) return false;
+  const repeatedIndex = firstTitle.indexOf(repeatedNumber);
+  const englishTitle = firstTitle.slice(0, repeatedIndex);
+  const koreanTitle = firstTitle.slice(repeatedIndex + repeatedNumber.length);
+  return PROCESS_SECTION_TITLES[number]?.test(englishTitle)
+    && PROCESS_SECTION_TITLES[number]?.test(koreanTitle);
+}
+
+function getProcessSections(source) {
+  const pages = Array.isArray(source) ? source : source.pages;
+  const repeatedNoise = findRepeatedPageFurniture(pages);
+  const lines = buildDocumentLines(source);
+  const repeatedFurniture = findRepeatedPageFurnitureByPosition(lines);
+  const starts = {};
+  let previous = -1;
+  [4, 5, 6, 7, 8, 9].forEach((number) => {
+    const index = lines.findIndex((line, lineIndex) => lineIndex > previous && isProcessSectionHeading(line.text, number));
+    starts[number] = index;
+    if (index >= 0) previous = index;
+  });
+  const section = (number) => {
+    const start = starts[number];
+    if (start < 0) return [];
+    const laterStarts = Object.entries(starts)
+      .filter(([nextNumber, index]) => Number(nextNumber) > number && index > start)
+      .map(([, index]) => index);
+    const end = laterStarts.length ? Math.min(...laterStarts) : lines.length;
+    return lines.slice(start + 1, end)
+      .filter((line) => !isProcessSectionHeading(line.text, number))
+      .filter((line) => !repeatedFurniture.isFurniture(line))
+      .map((line) => line.text)
+      .filter((line) => line && !isPdfNoiseLine(line, repeatedNoise) && !isProcessPageFurniture(line));
+  };
+  return { section, locations: starts };
+}
+
+function isProcessPageFurniture(line) {
+  const value = cleanLine(line);
+  const hasPageFraction = /(?:^|\|)\s*(?:page\s*)?(?:\|\s*)?\d+\s*(?:\/|of)\s*\d+(?:\s*\||$)/i.test(value);
+  const hasRevisionLabel = /개정\s*(?:횟수|번호|일자)|revision|rev\.?\s*(?:no\.?|date|\d)/i.test(value);
+  return hasPageFraction && (hasRevisionLabel || /\bpage\b/i.test(value) || value.split('|').length > 1);
+}
+
+function extractProcessSubfields(lines, definitions, boundaryPatterns = []) {
+  const result = Object.fromEntries(Object.keys(definitions).map((key) => [key, '']));
+  let activeKey = '';
+  lines.forEach((rawLine) => {
+    const line = cleanLine(rawLine);
+    const normalizedLine = normalized(line);
+    if (boundaryPatterns.some((pattern) => pattern.test(normalizedLine))) {
+      activeKey = '';
+      return;
+    }
+    const matched = Object.entries(definitions).find(([, pattern]) => pattern.test(normalizedLine));
+    if (matched) {
+      activeKey = matched[0];
+      const separatorIndex = line.search(/[|:：]/);
+      const inline = separatorIndex >= 0
+        ? cleanLine(line.slice(separatorIndex + 1))
+        : cleanLine(normalizedLine.replace(matched[1], ''));
+      if (inline) result[activeKey] = inline;
+      return;
+    }
+    if (!activeKey || isProcessSectionHeading(line, 4) || isProcessSectionHeading(line, 5)
+      || isProcessSectionHeading(line, 6) || isProcessSectionHeading(line, 7)
+      || isProcessSectionHeading(line, 8) || isProcessSectionHeading(line, 9)) return;
+    result[activeKey] = [result[activeKey], line].filter(Boolean).join('\n');
+  });
+  return result;
+}
+
+function createProcessGuideData(extracted, baseAnalysis, ghsCodes) {
+  const sections = getProcessSections(extracted);
+  const firstAid = extractProcessSubfields(sections.section(4), {
+    eye: /^(?:(?:[가-하]|\d{1,2})[.)]?\s*)?(?:눈에들어갔을(?:때|경우)|눈(?:에)?접촉(?:했을(?:때|경우)|시)?|안구접촉(?:했을(?:때|경우)|시)?|eyecontact)\s*(?:[|:：-]\s*)?/i,
+    skin: /^(?:(?:[가-하]|\d{1,2})[.)]?\s*)?(?:피부에접촉했을(?:때|경우)|피부접촉(?:했을(?:때|경우)|시)?|skincontact)\s*(?:[|:：-]\s*)?/i,
+    inhalation: /^(?:(?:[가-하]|\d{1,2})[.)]?\s*)?(?:흡입했을(?:때|경우)|흡입시|inhalation)\s*(?:[|:：-]\s*)?/i,
+    ingestion: /^(?:(?:[가-하]|\d{1,2})[.)]?\s*)?(?:먹었을(?:때|경우)|삼켰을(?:때|경우)|섭취(?:했을(?:때|경우)|시)?|ingestion)\s*(?:[|:：-]\s*)?/i
+  }, [/^(?:(?:[가-하]|\d{1,2})[.)]?\s*)?(?:기타의사의주의사항|의사의주의사항)/i]);
+  const handlingParts = extractProcessSubfields(sections.section(7), {
+    safeHandling: /^(?:(?:[가-하]|\d{1,2})[.)]?\s*)?(?:안전취급요령|안전한취급을위한(?:예방조치|주의사항)|취급시주의사항|precautionsforsafehandling)\s*(?:[|:：-]\s*)?/i,
+    storage: /^(?:(?:[가-하]|\d{1,2})[.)]?\s*)?(?:피해야할조건을포함한안전한저장방법|안전한저장방법|저장방법|저장시주의사항|보관방법|conditionsforsafestorage)\s*(?:[|:：-]\s*)?/i
+  });
+  if (!handlingParts.safeHandling && !handlingParts.storage) handlingParts.safeHandling = sections.section(7).join('\n');
+  const ppe = extractProcessSubfields(sections.section(8), {
+    respiratory: /^(?:[가-하]\.\s*)?(?:호흡기보호|호흡기보호구|respiratoryprotection)\s*(?:[|:：-]\s*)?/i,
+    eye: /^(?:[가-하]\.\s*)?(?:눈보호|눈및안면보호|눈안면보호|eye(?:face)?protection)\s*(?:[|:：-]\s*)?/i,
+    hand: /^(?:[가-하]\.\s*)?(?:손보호|손보호구|handprotection)\s*(?:[|:：-]\s*)?/i,
+    body: /^(?:[가-하]\.\s*)?(?:신체보호|신체보호구|피부및신체보호|bodyprotection|skinprotection)\s*(?:[|:：-]\s*)?/i
+  });
+  return {
+    productName: baseAnalysis.productName || '',
+    signalWord: baseAnalysis.signalWord || '',
+    ghs: [...ghsCodes],
+    hazardStatements: baseAnalysis.hazardStatements || '',
+    firstAid,
+    accidentResponse: {
+      fire: sections.section(5).join('\n'),
+      spill: sections.section(6).join('\n')
+    },
+    handling: handlingParts,
+    ppe,
+    extractionStatus: { sectionLocations: sections.locations }
+  };
+}
+
+function automaticGhsCodesFromEvidence(evidence) {
+  return [...new Set((evidence.cropDetection?.comparisons || [])
+    .filter((comparison) => classifyPictogramComparison(comparison) === 'A')
+    .map((comparison) => comparison.first.code))];
+}
+
+function displayProcessValue(value) {
+  return value && String(value).trim() ? String(value).trim() : '확인 필요';
+}
+
+function formatProcessGroups(groups, labels) {
+  const blocks = Object.entries(labels).map(([key, label]) => {
+    const value = groups[key];
+    return value ? `${label}\n${value}` : `${label}\n확인 필요`;
+  });
+  return blocks.join('\n\n');
+}
+
+const PROCESS_GHS_LABELS = {
+  GHS01: '폭발성', GHS02: '인화성', GHS03: '산화성', GHS04: '고압가스', GHS05: '부식성',
+  GHS06: '급성독성', GHS07: '경고', GHS08: '건강유해성', GHS09: '환경유해성'
+};
+
+const PROCESS_PPE_ICONS = [
+  { code: '301', key: 'eye', label: '보안경 착용', asset: 'assets/ppe/goggles.svg', present: (ppe) => Boolean(String(ppe.eye || '').trim()) },
+  { code: '302', key: 'gasMask', label: '방독마스크 착용', asset: 'assets/ppe/gas-mask.svg', present: (ppe) => /방독\s*마스크/i.test(ppe.respiratory) },
+  { code: '303', key: 'dustMask', label: '방진마스크 착용', asset: 'assets/ppe/dust-mask.svg', present: (ppe) => /방진\s*마스크/i.test(ppe.respiratory) },
+  { code: '304', key: 'faceShield', label: '보안면 착용', asset: 'assets/ppe/face-shield.svg', present: () => false },
+  { code: '305', key: 'helmet', label: '안전모 착용', asset: 'assets/ppe/helmet.svg', present: () => false },
+  { code: '306', key: 'hearing', label: '귀마개 착용', asset: 'assets/ppe/hearing-protection.svg', present: () => false },
+  { code: '307', key: 'shoes', label: '안전화 착용', asset: 'assets/ppe/safety-shoes.svg', present: () => false },
+  { code: '308', key: 'hand', label: '안전장갑 착용', asset: 'assets/ppe/gloves.svg', present: (ppe) => Boolean(String(ppe.hand || '').trim()) },
+  { code: '309', key: 'body', label: '안전복 착용', asset: 'assets/ppe/protective-clothing.svg', present: (ppe) => Boolean(String(ppe.body || '').trim()) }
+];
+
+function processPreviewItems(value, limit) {
+  const lines = String(value || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const itemStart = /^(?:[①-⑳]|[-•·▪◆◇■□※]|\d{1,2}[.)]|[가-하][.)]|[HP]\d{3}\b)/i;
+  const items = [];
+  lines.forEach((line) => {
+    if (!items.length || itemStart.test(line)) items.push(line);
+    else items[items.length - 1] += ` ${line}`;
+  });
+  if (items.length === 1 && !itemStart.test(items[0])) {
+    const sentences = items[0].split(/(?<=[.!?。])\s+(?=[가-힣A-Za-z0-9])/).filter(Boolean);
+    if (sentences.length > 1) return sentences.slice(0, limit);
+  }
+  return items.slice(0, limit);
+}
+
+function processAccidentPreviewItems(value, limit = 4) {
+  const rawLines = String(value || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const repairedLines = [];
+  rawLines.forEach((line) => {
+    const previousIndex = repairedLines.length - 1;
+    const continuesPrevious = previousIndex >= 0 && (
+      line.length <= 3
+      || /^(?:부터|까지|시오\.?$)/.test(line)
+      || /(?:으|시|으로)$/.test(repairedLines[previousIndex])
+    );
+    if (continuesPrevious) repairedLines[previousIndex] += line;
+    else repairedLines.push(line);
+  });
+
+  const items = [];
+  repairedLines.forEach((sourceLine) => {
+    let line = sourceLine.replace(/\s+\d{1,3}\s*\/\s*\d{1,3}\s*$/, '').trim();
+    if (!line || isPdfNoiseLine(line) || /^\d+\s*\.\s*(?:화재|누출)/.test(line)) return;
+    if (line.includes('|')) line = line.slice(line.lastIndexOf('|') + 1).trim();
+    else if (/^[가-하][.)]\s*/.test(line)) return;
+    line = line.replace(/^(?:[①-⑳]|[-•·▪◆◇■□※]|\d{1,2}[.)])\s*/, '').trim();
+    if (!line || isPdfNoiseLine(line)) return;
+    line.split(/(?<=[.!?。])\s+(?=[가-힣A-Za-z0-9①-⑳])/).map((sentence) => sentence.trim()).filter(Boolean).forEach((sentence) => {
+      if (items.length < limit && !isPdfNoiseLine(sentence)) items.push(sentence);
+    });
+  });
+  return items.slice(0, limit);
+}
+
+function renderProcessItemList(selector, value, limit) {
+  const list = document.querySelector(selector);
+  const items = processPreviewItems(value, limit);
+  list.replaceChildren(...items.map((text) => Object.assign(document.createElement('li'), { textContent: text })));
+}
+
+function renderProcessAccidentList(selector, value) {
+  const list = document.querySelector(selector);
+  const items = processAccidentPreviewItems(value);
+  list.replaceChildren(...items.map((text) => Object.assign(document.createElement('li'), { textContent: text })));
+}
+
+function scaleProcessPreview() {
+  const shell = document.querySelector('#process-preview');
+  const stage = shell?.querySelector('.process-preview-stage');
+  const poster = stage?.querySelector('.process-poster');
+  if (!shell || shell.hidden || !stage || !poster) return;
+  const availableWidth = shell.clientWidth - parseFloat(getComputedStyle(shell).paddingLeft) - parseFloat(getComputedStyle(shell).paddingRight);
+  const scale = Math.min(1, availableWidth / 794);
+  poster.style.transform = `scale(${scale})`;
+  poster.style.transformOrigin = 'top left';
+  stage.style.width = `${794 * scale}px`;
+  stage.style.height = `${poster.offsetHeight * scale}px`;
+}
+
+function renderProcessGuideData(data) {
+  const productName = document.querySelector('#process-product-name');
+  productName.textContent = String(data.productName || '').trim();
+  productName.classList.toggle('long', productName.textContent.length > 24);
+  const ghsArea = document.querySelector('#process-ghs');
+  const pictograms = data.ghs.map((code) => GHS_PICTOGRAMS.find((item) => item.code === code)).filter(Boolean);
+  ghsArea.replaceChildren(...pictograms.map((pictogram) => {
+    const item = document.createElement('div');
+    item.className = 'process-ghs-item';
+    item.append(
+      Object.assign(document.createElement('img'), { src: pictogram.asset, alt: pictogram.name }),
+      Object.assign(document.createElement('span'), { textContent: PROCESS_GHS_LABELS[pictogram.code] || pictogram.name })
+    );
+    return item;
+  }));
+  document.querySelector('#process-signal-word').textContent = String(data.signalWord || '').trim();
+  renderProcessItemList('#process-hazards', data.hazardStatements, 5);
+  renderProcessItemList('#process-handling', data.handling.safeHandling, 5);
+  const ppeArea = document.querySelector('#process-ppe');
+  const selectedPpe = new Set(data.selectedPpe || PROCESS_PPE_ICONS.filter((item) => item.present(data.ppe)).map((item) => item.code));
+  const ppeItems = PROCESS_PPE_ICONS.filter((item) => selectedPpe.has(item.code)).map((item) => {
+    const icon = document.createElement('div');
+    icon.className = 'process-ppe-icon';
+    icon.dataset.ppe = item.key;
+    icon.append(
+      Object.assign(document.createElement('img'), { src: item.asset, alt: item.label }),
+      Object.assign(document.createElement('span'), { textContent: item.label })
+    );
+    return icon;
+  });
+  const emptyPpe = data.ppeNone ? Object.assign(document.createElement('span'), {
+    className: 'process-ppe-empty', textContent: '해당 없음'
+  }) : null;
+  ppeArea.replaceChildren(...ppeItems, ...(emptyPpe ? [emptyPpe] : []));
+  renderProcessItemList('#process-first-aid-eye', data.firstAid.eye, 3);
+  renderProcessItemList('#process-first-aid-skin', data.firstAid.skin, 3);
+  renderProcessItemList('#process-first-aid-inhalation', data.firstAid.inhalation, 3);
+  renderProcessItemList('#process-first-aid-ingestion', data.firstAid.ingestion, 3);
+  renderProcessAccidentList('#process-accident-fire', data.accidentResponse.fire);
+  renderProcessAccidentList('#process-accident-spill', data.accidentResponse.spill);
+  document.querySelector('#process-preview').hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(scaleProcessPreview));
+}
+
+window.addEventListener('resize', scaleProcessPreview);
+
+function automaticProcessPpeCodes(ppe) {
+  return PROCESS_PPE_ICONS.filter((item) => item.present(ppe)).map((item) => item.code);
+}
+
+function setProcessEditorHeading(isPreview) {
+  document.querySelector('#process-result-step').textContent = isPreview ? '03' : '02';
+  document.querySelector('#process-result-title').textContent = isPreview ? '미리보기' : '분석결과 확인 및 수정';
+}
+
+function renderProcessEditorChoices(data) {
+  const ghsArea = document.querySelector('#process-edit-ghs');
+  ghsArea.replaceChildren(...GHS_PICTOGRAMS.map((item) => {
+    const label = document.createElement('label');
+    label.className = 'process-edit-choice';
+    const input = Object.assign(document.createElement('input'), { type: 'checkbox', value: item.code, checked: data.ghs.includes(item.code) });
+    input.dataset.processGhs = '';
+    const content = document.createElement('span');
+    content.append(Object.assign(document.createElement('img'), { src: item.asset, alt: '' }), document.createTextNode(`${item.code} ${PROCESS_GHS_LABELS[item.code] || item.name}`));
+    label.append(input, content);
+    return label;
+  }));
+  const ppeArea = document.querySelector('#process-edit-ppe');
+  ppeArea.replaceChildren(...PROCESS_PPE_ICONS.map((item) => {
+    const label = document.createElement('label');
+    label.className = 'process-edit-choice process-edit-ppe-choice';
+    const input = Object.assign(document.createElement('input'), { type: 'checkbox', value: item.code, checked: data.selectedPpe.includes(item.code) });
+    input.dataset.processPpe = '';
+    input.addEventListener('change', () => {
+      if (input.checked) document.querySelector('#process-edit-ppe-none').checked = false;
+    });
+    const content = document.createElement('span');
+    content.append(Object.assign(document.createElement('img'), { src: item.asset, alt: '' }), document.createTextNode(`${item.code} ${item.label}`));
+    label.append(input, content);
+    return label;
+  }));
+}
+
+function initializeProcessGuideEditor(sourceData) {
+  const editable = structuredClone(sourceData);
+  editable.selectedPpe = automaticProcessPpeCodes(editable.ppe);
+  editable.ppeNone = false;
+  window.__hssoProcessGuideEditableData = editable;
+  document.querySelector('#process-edit-product').value = editable.productName;
+  document.querySelector('#process-edit-signal').value = editable.signalWord;
+  document.querySelector('#process-edit-hazards').value = editable.hazardStatements;
+  document.querySelector('#process-edit-handling').value = editable.handling.safeHandling;
+  document.querySelector('#process-edit-first-eye').value = editable.firstAid.eye;
+  document.querySelector('#process-edit-first-skin').value = editable.firstAid.skin;
+  document.querySelector('#process-edit-first-inhalation').value = editable.firstAid.inhalation;
+  document.querySelector('#process-edit-first-ingestion').value = editable.firstAid.ingestion;
+  document.querySelector('#process-edit-fire').value = editable.accidentResponse.fire;
+  document.querySelector('#process-edit-spill').value = editable.accidentResponse.spill;
+  document.querySelector('#process-edit-ppe-none').checked = false;
+  renderProcessEditorChoices(editable);
+  const status = document.querySelector('#process-ppe-analysis-status');
+  status.textContent = editable.selectedPpe.length ? '자동 선택됨' : '확인 필요';
+  status.classList.toggle('confirmed', Boolean(editable.selectedPpe.length));
+  setProcessEditorHeading(false);
+  document.querySelector('#process-preview').hidden = true;
+  document.querySelector('#process-editor').hidden = false;
+}
+
+function collectProcessGuideEditableData() {
+  const data = window.__hssoProcessGuideEditableData;
+  data.productName = document.querySelector('#process-edit-product').value.trim();
+  data.signalWord = document.querySelector('#process-edit-signal').value.trim();
+  data.ghs = [...document.querySelectorAll('[data-process-ghs]:checked')].map((input) => input.value);
+  data.hazardStatements = document.querySelector('#process-edit-hazards').value.trim();
+  data.handling.safeHandling = document.querySelector('#process-edit-handling').value.trim();
+  data.firstAid.eye = document.querySelector('#process-edit-first-eye').value.trim();
+  data.firstAid.skin = document.querySelector('#process-edit-first-skin').value.trim();
+  data.firstAid.inhalation = document.querySelector('#process-edit-first-inhalation').value.trim();
+  data.firstAid.ingestion = document.querySelector('#process-edit-first-ingestion').value.trim();
+  data.accidentResponse.fire = document.querySelector('#process-edit-fire').value.trim();
+  data.accidentResponse.spill = document.querySelector('#process-edit-spill').value.trim();
+  data.ppeNone = document.querySelector('#process-edit-ppe-none').checked;
+  data.selectedPpe = data.ppeNone ? [] : [...document.querySelectorAll('[data-process-ppe]:checked')].map((input) => input.value);
+  return data;
+}
+
+document.querySelector('#process-edit-ppe-none').addEventListener('change', (event) => {
+  if (event.target.checked) document.querySelectorAll('[data-process-ppe]').forEach((input) => { input.checked = false; });
+});
+
+document.querySelector('#process-create-preview').addEventListener('click', () => {
+  const editable = collectProcessGuideEditableData();
+  renderProcessGuideData(editable);
+  document.querySelector('#process-editor').hidden = true;
+  setProcessEditorHeading(true);
+  document.querySelector('#process-preview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+document.querySelector('#process-edit-again').addEventListener('click', () => {
+  document.querySelector('#process-preview').hidden = true;
+  document.querySelector('#process-editor').hidden = false;
+  setProcessEditorHeading(false);
+  document.querySelector('#process-editor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+function safeProcessGuidePdfFilename(productName) {
+  const safeName = String(productName || '')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+    .replace(/[.\s]+$/g, '')
+    .trim()
+    .slice(0, 80);
+  return safeName ? `작업공정별관리요령_${safeName}.pdf` : '작업공정별관리요령.pdf';
+}
+
+async function rasterizeProcessGuideImages(root) {
+  await Promise.all([...root.querySelectorAll('img')].map(async (image) => {
+    const sourceUrl = image.currentSrc || image.src;
+    const source = new Image();
+    source.src = sourceUrl;
+    await source.decode();
+    if (!source.naturalWidth || !source.naturalHeight) throw new Error(`이미지 변환 실패: ${image.alt || sourceUrl}`);
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    image.dataset.sourceSrc = sourceUrl;
+    image.src = canvas.toDataURL('image/png');
+    await image.decode();
+  }));
+}
+
+function inspectProcessPdfDom(poster) {
+  const posterRect = poster.getBoundingClientRect();
+  const renderTolerance = 2;
+  const images = [...poster.querySelectorAll('.process-ghs-item img, .process-ppe-icon img')].map((image) => {
+    const rect = image.getBoundingClientRect();
+    return {
+      kind: image.closest('.process-ghs-item') ? 'ghs' : 'ppe',
+      label: image.alt,
+      sourceSrc: image.dataset.sourceSrc || '',
+      naturalWidth: image.naturalWidth,
+      naturalHeight: image.naturalHeight,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height
+    };
+  });
+  const clipped = [poster, ...poster.querySelectorAll('*')].filter((element) =>
+    element.scrollHeight > element.clientHeight + 1 && getComputedStyle(element).overflowY === 'hidden'
+  );
+  if (Math.abs(posterRect.width - 794) > renderTolerance || posterRect.height - 1123 > renderTolerance
+    || poster.scrollWidth - poster.clientWidth > renderTolerance || poster.scrollHeight - poster.clientHeight > renderTolerance || clipped.length) {
+    throw new Error('입력한 내용이 A4 한 페이지에 들어가지 않습니다. 일부 항목의 내용을 줄인 후 다시 시도해 주세요.');
+  }
+  if (images.some((item) => !item.sourceSrc || !item.naturalWidth || !item.naturalHeight || item.width <= 0 || item.height <= 0)) {
+    throw new Error('PDF 캡처용 GHS 또는 보호구 이미지를 준비하지 못했습니다.');
+  }
+  return { posterRect, width: posterRect.width, height: posterRect.height, images };
+}
+
+function verifyProcessPdfCanvas(canvas, geometry) {
+  const scaleX = canvas.width / geometry.width;
+  const scaleY = canvas.height / geometry.height;
+  const results = geometry.images.map((item) => {
+    const x = Math.max(0, Math.floor((item.left - geometry.posterRect.left) * scaleX));
+    const y = Math.max(0, Math.floor((item.top - geometry.posterRect.top) * scaleY));
+    const width = Math.min(canvas.width - x, Math.max(1, Math.floor(item.width * scaleX)));
+    const height = Math.min(canvas.height - y, Math.max(1, Math.floor(item.height * scaleY)));
+    const pixels = canvas.getContext('2d').getImageData(x, y, width, height).data;
+    let redPixels = 0;
+    let bluePixels = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const red = pixels[index];
+      const green = pixels[index + 1];
+      const blue = pixels[index + 2];
+      const alpha = pixels[index + 3];
+      if (alpha > 0 && red > 145 && green < 135 && blue < 135) redPixels += 1;
+      if (alpha > 0 && blue > 100 && blue > red * 1.25 && blue > green * 1.08) bluePixels += 1;
+    }
+    return { kind: item.kind, label: item.label, redPixels, bluePixels, width, height };
+  });
+  if (results.some((item) => item.kind === 'ghs' && item.redPixels < 25)
+    || results.some((item) => item.kind === 'ppe' && item.bluePixels < 25)) {
+    throw new Error('PDF 캡처 결과에서 일부 GHS 또는 보호구 지시표지를 확인하지 못했습니다.');
+  }
+  return results;
+}
+
+async function createProcessGuidePdfCanvas() {
+  const preview = document.querySelector('#process-preview');
+  const poster = preview.querySelector('.process-poster');
+  if (preview.hidden || !poster) throw new Error('먼저 미리보기를 생성해 주세요.');
+  const renderPoster = poster.cloneNode(true);
+  renderPoster.classList.add('process-pdf-render');
+  document.body.append(renderPoster);
+  try {
+    await waitForOutputImages(renderPoster);
+    await rasterizeProcessGuideImages(renderPoster);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const geometry = inspectProcessPdfDom(renderPoster);
+    const scale = 3;
+    const canvas = await window.html2canvas(renderPoster, {
+      backgroundColor: '#ffffff',
+      logging: false,
+      scale,
+      useCORS: true,
+      width: 794,
+      height: 1123,
+      windowWidth: 794,
+      windowHeight: 1123,
+      scrollX: 0,
+      scrollY: 0
+    });
+    const imageAudit = verifyProcessPdfCanvas(canvas, geometry);
+    return { canvas, scale, geometry, imageAudit };
+  } finally {
+    renderPoster.remove();
+  }
+}
+
+async function downloadProcessGuidePdf() {
+  const button = document.querySelector('#process-download-pdf');
+  const message = document.querySelector('#process-pdf-message');
+  message.hidden = true;
+  message.className = 'process-pdf-message';
+  if (!window.html2canvas || !window.jspdf?.jsPDF) {
+    message.textContent = 'PDF 생성 도구를 불러오지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.';
+    message.classList.add('error');
+    message.hidden = false;
+    return;
+  }
+  button.disabled = true;
+  button.textContent = 'PDF 생성 중...';
+  try {
+    const render = await createProcessGuidePdfCanvas();
+    const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    if (Math.abs(pageWidth - 210) > 0.02 || Math.abs(pageHeight - 297) > 0.02 || pdf.getNumberOfPages() !== 1) {
+      throw new Error('A4 세로 1페이지 PDF를 준비하지 못했습니다.');
+    }
+    pdf.addImage(render.canvas.toDataURL('image/png'), 'PNG', 0, 0, pageWidth, pageHeight, undefined, 'FAST');
+    const filename = safeProcessGuidePdfFilename(window.__hssoProcessGuideEditableData?.productName);
+    window.__hssoLastProcessPdfAudit = {
+      filename,
+      captureScale: render.scale,
+      canvas: { width: render.canvas.width, height: render.canvas.height },
+      page: { width: pageWidth, height: pageHeight, count: pdf.getNumberOfPages() },
+      images: render.imageAudit
+    };
+    pdf.save(filename);
+    message.textContent = 'A4 세로 1페이지 PDF를 생성했습니다.';
+    message.hidden = false;
+  } catch (error) {
+    console.error('작업공정별 관리요령 PDF 생성 오류:', error);
+    message.textContent = error?.message || 'PDF 생성 중 오류가 발생했습니다.';
+    message.classList.add('error');
+    message.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'PDF 출력';
+  }
+}
+
+document.querySelector('#process-download-pdf').addEventListener('click', downloadProcessGuidePdf);
+
+const processFileInput = document.querySelector('#process-file-input');
+const processDropZone = document.querySelector('.process-drop-zone');
+const processAnalyzeButton = document.querySelector('#process-analyze-button');
+const processAnalysisStatus = document.querySelector('#process-analysis-status');
+
+function selectProcessFile(file) {
+  if (!isPdf(file)) {
+    selectedProcessFile = null;
+    processAnalysisStatus.textContent = 'PDF 파일만 선택할 수 있습니다.';
+  } else {
+    selectedProcessFile = file;
+    processAnalysisStatus.textContent = `${file.name} · ${formatFileSize(file.size)}`;
+  }
+  processAnalyzeButton.disabled = !selectedProcessFile || isProcessAnalyzing;
+}
+
+processFileInput.addEventListener('change', () => selectProcessFile(processFileInput.files[0]));
+['dragenter', 'dragover'].forEach((eventName) => processDropZone.addEventListener(eventName, (event) => {
+  event.preventDefault();
+  processDropZone.classList.add('dragging');
+}));
+['dragleave', 'drop'].forEach((eventName) => processDropZone.addEventListener(eventName, (event) => {
+  event.preventDefault();
+  processDropZone.classList.remove('dragging');
+}));
+processDropZone.addEventListener('drop', (event) => selectProcessFile(event.dataTransfer.files[0]));
+
+processAnalyzeButton.addEventListener('click', async () => {
+  if (!selectedProcessFile || isProcessAnalyzing) return;
+  isProcessAnalyzing = true;
+  processAnalyzeButton.disabled = true;
+  processAnalyzeButton.textContent = '분석 중...';
+  processAnalysisStatus.textContent = 'MSDS의 1·2·4·5·6·7·8항을 분석하고 있습니다.';
+  let extracted;
+  try {
+    extracted = await extractPdfText(selectedProcessFile);
+    const baseAnalysis = analyzeMsdsText(extracted);
+    const pictogramEvidence = findSectionTwoEvidence(extracted);
+    pictogramEvidence.cropDetection = await extractSectionTwoPictogramCrops(extracted, baseAnalysis);
+    pictogramEvidence.cropDetection.comparisons = await comparePictogramCrops(pictogramEvidence.cropDetection);
+    const data = createProcessGuideData(extracted, baseAnalysis, automaticGhsCodesFromEvidence(pictogramEvidence));
+    window.__hssoLastProcessGuideData = data;
+    initializeProcessGuideEditor(data);
+    processAnalysisStatus.textContent = '분석이 완료되었습니다. 확인 필요 항목은 원본 MSDS와 대조해 주세요.';
+    document.querySelector('#process-result-title').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) {
+    console.error('관리요령 MSDS 분석 오류:', error);
+    processAnalysisStatus.textContent = error?.message || 'PDF 분석 중 오류가 발생했습니다.';
+  } finally {
+    if (extracted?.pdfDocument) await extracted.pdfDocument.destroy();
+    isProcessAnalyzing = false;
+    processAnalyzeButton.disabled = !selectedProcessFile;
+    processAnalyzeButton.textContent = '분석하기';
+  }
+});
+
 const menuButton = document.querySelector('.menu-button');
 const mainMenu = document.querySelector('#main-menu');
 menuButton.addEventListener('click', () => {
@@ -2181,3 +2778,39 @@ document.querySelectorAll('[data-coming-soon]').forEach((link) => {
     toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
   });
 });
+
+const appViews = {
+  maker: document.querySelector('#maker'),
+  'process-guide': document.querySelector('#process-guide')
+};
+
+function showAppView(viewName) {
+  const nextView = appViews[viewName] || appViews.maker;
+  Object.values(appViews).forEach((view) => {
+    view.hidden = view !== nextView;
+  });
+  document.querySelectorAll('[data-view-link]').forEach((link) => {
+    const isActive = link.dataset.viewLink === viewName && link.closest('.main-nav');
+    link.classList.toggle('active', Boolean(isActive));
+    if (isActive) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+  mainMenu.classList.remove('open');
+  menuButton.setAttribute('aria-expanded', 'false');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+document.querySelectorAll('[data-view-link]').forEach((link) => {
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    const viewName = link.dataset.viewLink;
+    if (window.location.hash !== `#${viewName}`) history.pushState({ viewName }, '', `#${viewName}`);
+    showAppView(viewName);
+  });
+});
+
+window.addEventListener('popstate', () => {
+  showAppView(window.location.hash.slice(1) || 'maker');
+});
+
+if (window.location.hash === '#process-guide') showAppView('process-guide');

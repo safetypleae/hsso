@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="title">
+  <title id="title">308 안전장갑 착용</title><circle cx="50" cy="50" r="49" fill="#0668bd"/>
+  <path d="M47 74 42 43c-.7-4 5-6 7-2l2 8V24c0-5 7-5 7 0v19-23c0-5 7-5 7 0v23-18c0-5 7-5 7 0v21-13c0-5 7-5 7 0v26c0 14-8 23-20 25z" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/>
+  <path d="M23 78 17 52c-1-5 5-7 8-3l4 7-3-26c-.5-5 7-6 8-1l3 22-2-28c-.5-5 7-6 8-1l3 29-1-21c0-5 7-5 8 0l2 32c1 13-7 22-19 25z" fill="#fff"/>
+</svg>

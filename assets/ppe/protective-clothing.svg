@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="title">
+  <title id="title">309 안전복 착용</title><circle cx="50" cy="50" r="49" fill="#0668bd"/>
+  <circle cx="50" cy="19" r="9" fill="#fff"/>
+  <path d="M36 31h28l7 8 12 17-9 7-12-17v39H52l-2-30-2 30H37V46L25 63l-9-7 13-18z" fill="#fff"/>
+  <path d="M43 31 50 45l7-14M50 45v10" fill="none" stroke="#0668bd" stroke-width="3" stroke-linejoin="round"/>
+</svg>

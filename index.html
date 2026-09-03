@@ -10,11 +10,12 @@
 <body>
   <header class="site-header">
     <div class="header-inner">
-      <a class="logo" href="#" aria-label="HSSO 홈">HSSO<span>.</span></a>
+      <a class="logo" href="#maker" aria-label="HSSO 홈" data-view-link="maker">HSSO<span>.</span></a>
       <button class="menu-button" type="button" aria-expanded="false" aria-controls="main-menu">메뉴</button>
       <nav id="main-menu" class="main-nav" aria-label="주요 메뉴">
         <a href="#" data-coming-soon>홈</a>
-        <a href="#maker" class="active" aria-current="page">경고표지 제작</a>
+        <a href="#maker" class="active" aria-current="page" data-view-link="maker">경고표지 제작</a>
+        <a href="#process-guide" data-view-link="process-guide">작업공정별 관리요령</a>
         <a href="#" data-coming-soon>MSDS 검색</a>
         <a href="#" data-coming-soon>안전보건 도구</a>
         <a href="#" data-coming-soon>자료실</a>
@@ -214,6 +215,135 @@
           <pre id="raw-text-content" tabindex="0"></pre>
         </div>
       </div>
+    </section>
+  </main>
+
+  <main id="process-guide" class="process-guide-view" hidden>
+    <section class="process-guide-hero section-shell">
+      <button class="back-button" type="button" data-view-link="maker" aria-label="메인 화면으로 돌아가기">
+        <span aria-hidden="true">←</span> 메인 화면으로
+      </button>
+      <p class="eyebrow">PROCESS SAFETY GUIDE</p>
+      <h1>작업공정별 관리요령</h1>
+      <p class="hero-description">MSDS를 업로드하여 작업공정별 관리요령을 작성할 수 있습니다.</p>
+    </section>
+
+    <section class="process-guide-workspace section-shell" aria-labelledby="process-upload-title">
+      <div class="section-heading">
+        <span class="step-number">01</span>
+        <div>
+          <h2 id="process-upload-title">MSDS PDF 업로드</h2>
+          <p>관리요령 작성에 사용할 MSDS 원본 PDF 파일을 선택해 주세요.</p>
+        </div>
+      </div>
+
+      <label class="drop-zone process-drop-zone" for="process-file-input">
+        <input id="process-file-input" type="file" accept="application/pdf,.pdf" hidden>
+        <span class="upload-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+        </span>
+        <strong>MSDS PDF를 여기에 놓거나 선택해 주세요.</strong>
+        <span class="file-select-button">파일 선택</span>
+        <small>PDF 형식만 업로드할 수 있습니다.</small>
+      </label>
+
+      <button id="process-analyze-button" class="primary-button process-analyze-button" type="button" disabled>분석하기</button>
+      <p id="process-analysis-status" class="process-ready-note" role="status" aria-live="polite">PDF를 선택하면 분석할 수 있습니다.</p>
+
+      <div class="divider"></div>
+
+      <div class="section-heading compact">
+        <span id="process-result-step" class="step-number">02</span>
+        <div>
+          <h2 id="process-result-title">분석결과 확인 및 수정</h2>
+          <p>MSDS 자동 분석 결과입니다. 내용을 확인하고 필요한 경우 수정한 후 미리보기를 생성해주세요.</p>
+        </div>
+      </div>
+
+      <section id="process-editor" class="process-editor" aria-labelledby="process-result-title" hidden>
+        <div class="process-editor-grid">
+          <label class="process-edit-field"><strong>제품명</strong><input id="process-edit-product" type="text"></label>
+          <label class="process-edit-field"><strong>신호어</strong><input id="process-edit-signal" type="text" list="process-signal-options"><datalist id="process-signal-options"><option value="위험"><option value="경고"><option value="해당 없음"></datalist></label>
+        </div>
+        <fieldset class="process-choice-field"><legend>GHS 그림문자</legend><div id="process-edit-ghs" class="process-edit-ghs"></div></fieldset>
+        <label class="process-edit-field"><strong>유해성·위험성 <small>미리보기 최대 5개</small></strong><textarea id="process-edit-hazards" rows="7"></textarea></label>
+        <label class="process-edit-field"><strong>안전취급요령 <small>미리보기 최대 5개</small></strong><textarea id="process-edit-handling" rows="7"></textarea></label>
+        <fieldset class="process-choice-field">
+          <legend>보호구 <span id="process-ppe-analysis-status" class="process-auto-status">확인 필요</span></legend>
+          <p class="process-field-help">자동 선택 결과를 확인하고 필요한 지시표지를 직접 선택하거나 해제하세요.</p>
+          <div id="process-edit-ppe" class="process-edit-ppe"></div>
+          <label class="process-none-choice"><input id="process-edit-ppe-none" type="checkbox"> 보호구 해당 없음 <small>사용자가 최종 확인한 경우에만 선택</small></label>
+        </fieldset>
+        <div class="process-editor-section"><h3>응급조치 요령 <small>각 미리보기 최대 3개</small></h3><div class="process-editor-grid">
+          <label class="process-edit-field"><strong>눈 접촉</strong><textarea id="process-edit-first-eye" rows="6"></textarea></label>
+          <label class="process-edit-field"><strong>피부 접촉</strong><textarea id="process-edit-first-skin" rows="6"></textarea></label>
+          <label class="process-edit-field"><strong>흡입</strong><textarea id="process-edit-first-inhalation" rows="6"></textarea></label>
+          <label class="process-edit-field"><strong>섭취</strong><textarea id="process-edit-first-ingestion" rows="6"></textarea></label>
+        </div></div>
+        <div class="process-editor-section"><h3>사고 시 대처방법 <small>각 미리보기 최대 5개</small></h3><div class="process-editor-grid">
+          <label class="process-edit-field"><strong>화재 시</strong><textarea id="process-edit-fire" rows="7"></textarea></label>
+          <label class="process-edit-field"><strong>누출 시</strong><textarea id="process-edit-spill" rows="7"></textarea></label>
+        </div></div>
+        <button id="process-create-preview" class="primary-button process-preview-button" type="button">미리보기</button>
+      </section>
+
+      <section id="process-preview" class="process-preview-shell" aria-labelledby="process-result-title" hidden>
+        <div class="process-preview-stage">
+        <article class="process-poster" aria-label="화학물질 작업공정별 관리요령">
+          <p class="process-legal-note">산업안전보건법 제114조 규정에 의거</p>
+          <h3 class="process-poster-title">화학물질 작업공정별 관리요령</h3>
+          <div id="process-product-name" class="process-product-name">확인 필요</div>
+
+          <div class="process-ghs-signal-row">
+            <div id="process-ghs" class="process-ghs-area" aria-label="GHS 그림문자"></div>
+            <div class="process-signal-area">
+              <strong>신호어</strong>
+              <span id="process-signal-word">확인 필요</span>
+            </div>
+          </div>
+
+          <section class="process-table-row">
+            <h4 class="process-main-label">유해성<br>·위험성</h4>
+            <ul id="process-hazards" class="process-main-content process-item-list"><li>확인 필요</li></ul>
+          </section>
+
+          <section class="process-table-row">
+            <h4 class="process-main-label">취급 시<br>주의사항</h4>
+            <ul id="process-handling" class="process-main-content process-item-list"><li>확인 필요</li></ul>
+          </section>
+
+          <section class="process-table-row">
+            <h4 class="process-main-label">보호구</h4>
+            <div id="process-ppe" class="process-main-content process-ppe-icons" aria-label="필요 보호구"></div>
+          </section>
+
+          <section class="process-table-row">
+            <h4 class="process-main-label">응급조치<br>요령</h4>
+            <div class="process-main-content process-subtable">
+              <div class="process-subrow"><strong>눈 접촉</strong><ul id="process-first-aid-eye" class="process-item-list"><li>확인 필요</li></ul></div>
+              <div class="process-subrow"><strong>피부 접촉</strong><ul id="process-first-aid-skin" class="process-item-list"><li>확인 필요</li></ul></div>
+              <div class="process-subrow"><strong>흡입</strong><ul id="process-first-aid-inhalation" class="process-item-list"><li>확인 필요</li></ul></div>
+              <div class="process-subrow"><strong>섭취</strong><ul id="process-first-aid-ingestion" class="process-item-list"><li>확인 필요</li></ul></div>
+            </div>
+          </section>
+
+          <section class="process-table-row">
+            <h4 class="process-main-label">사고 시<br>대처방법</h4>
+            <div class="process-main-content process-accident-grid">
+              <div class="process-accident-row"><strong>화재 시</strong><ul id="process-accident-fire" class="process-item-list"><li>확인 필요</li></ul></div>
+              <div class="process-accident-row"><strong>누출 시</strong><ul id="process-accident-spill" class="process-item-list"><li>확인 필요</li></ul></div>
+            </div>
+          </section>
+
+          <p class="process-poster-footer">※ 기타 자세한 내용은 물질안전보건자료(MSDS)참조</p>
+        </article>
+        </div>
+        <div class="process-preview-actions">
+          <button id="process-edit-again" class="secondary-button" type="button">내용 수정</button>
+          <button id="process-download-pdf" class="primary-button" type="button">PDF 출력</button>
+        </div>
+        <p id="process-pdf-message" class="process-pdf-message" role="status" aria-live="polite" hidden></p>
+      </section>
     </section>
   </main>
 

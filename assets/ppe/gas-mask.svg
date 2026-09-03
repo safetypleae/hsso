@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="title">
+  <title id="title">302 방독마스크 착용</title><circle cx="50" cy="50" r="49" fill="#0668bd"/>
+  <path d="M29 31c3-12 11-19 22-19 14 0 23 11 23 27v21c0 16-10 26-23 26S28 76 28 60V39" fill="#fff"/>
+  <path d="M27 29c9-15 29-21 43-7-8 2-14 0-20-5-6 7-13 11-23 12z" fill="#0668bd"/>
+  <g fill="#0668bd" stroke="#fff" stroke-width="3"><circle cx="39" cy="42" r="10"/><circle cx="62" cy="42" r="10"/><circle cx="34" cy="62" r="7"/><ellipse cx="51" cy="73" rx="14" ry="10"/></g>
+  <path d="M28 43 20 38M74 43l7-5M30 57l-9 7M72 57l9 7" fill="none" stroke="#fff" stroke-width="3"/>
+</svg>
