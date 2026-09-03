@@ -37,7 +37,7 @@ const diagnosticsPageLengths = document.querySelector('#diagnostics-page-lengths
 const diagnosticsScanStatus = document.querySelector('#diagnostics-scan-status');
 const pictogramOptions = document.querySelector('#pictogram-options');
 const pictogramResults = document.querySelector('#pictogram-results');
-const previewPictograms = document.querySelector('#preview-pictograms');
+const printPreview = document.querySelector('#print-preview');
 const statusPictograms = document.querySelector('#status-pictograms');
 
 const GHS_PICTOGRAMS = [
@@ -52,10 +52,10 @@ const GHS_PICTOGRAMS = [
   { code: 'GHS09', name: '환경유해성', asset: 'assets/ghs/ghs09.svg', exactNames: ['환경', '환경 유해성', '환경유해성', 'environment'] }
 ];
 
-const RECOMMENDED_LABEL_SIZES = {
-  소형: { width: 90, height: 120 },
-  중형: { width: 120, height: 160 },
-  대형: { width: 150, height: 200 }
+const PRINT_LAYOUTS = {
+  대형: { pageWidth: 210, pageHeight: 297, columns: 1, rows: 1, count: 1, margin: 5, gap: 0, description: 'A4 세로 · 1개' },
+  중형: { pageWidth: 297, pageHeight: 210, columns: 2, rows: 1, count: 2, margin: 5, gap: 10, description: 'A4 가로 · 세로형 2개' },
+  소형: { pageWidth: 210, pageHeight: 297, columns: 2, rows: 2, count: 4, margin: 5, gap: 6, description: 'A4 세로 · 세로형 4개' }
 };
 
 const pictogramSources = new Map();
@@ -63,6 +63,8 @@ const pictogramCandidates = new Map();
 const pictogramAutomaticGrades = new Map();
 let unresolvedPictogramCount = 0;
 let pictogramEmptyReason = '';
+let previewWarningLabelData = null;
+let previewResizeObserver = null;
 
 let selectedFile = null;
 let isAnalyzing = false;
@@ -132,22 +134,20 @@ function getSelectedLabelSize() {
   if (selectedSize.value === 'custom') {
     const width = Number(customWidth.value);
     const height = Number(customHeight.value);
-    return width > 0 && height > 0 ? { name: '직접 입력', width, height } : null;
+    return width > 0 && height > 0 ? {
+      name: '직접 입력', pageWidth: width, pageHeight: height, columns: 1, rows: 1,
+      count: 1, margin: 0, gap: 0, description: `${width} × ${height} mm`
+    } : null;
   }
-  const recommended = RECOMMENDED_LABEL_SIZES[selectedSize.value];
-  return recommended ? { name: selectedSize.value, ...recommended } : null;
-}
-
-function applyLabelSizeVariables(label, size) {
-  label.style.setProperty('--label-width-mm', `${size.width}mm`);
-  label.style.setProperty('--label-height-mm', `${size.height}mm`);
+  const layout = PRINT_LAYOUTS[selectedSize.value];
+  return layout ? { name: selectedSize.value, ...layout } : null;
 }
 
 function refreshSelectedLabelSize() {
   const size = getSelectedLabelSize();
   if (!size || results.hidden) return;
-  selectedSizeText.textContent = `${size.name} · ${size.width} × ${size.height} mm`;
-  applyLabelSizeVariables(document.querySelector('.warning-label'), size);
+  selectedSizeText.textContent = `${size.name} · ${size.description}`;
+  renderPrintPreview();
 }
 
 function updateAnalyzeButton() {
@@ -194,7 +194,7 @@ const CIRCLED_ITEM_PATTERN = /^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯
 const LIST_ITEM_PATTERN = /^(?:(?:[가-하]|\d{1,2})\s*[.)·]\s*|[()（]\s*(?:[가-하]|\d{1,2})\s*[)）]\s*)/;
 
 function stripListMarker(value) {
-  return value.replace(CIRCLED_ITEM_PATTERN, '').replace(LIST_ITEM_PATTERN, '').trim();
+  return value.replace(/^[○●◎◇◆□■△▲▽▼※]\s*/, '').replace(CIRCLED_ITEM_PATTERN, '').replace(LIST_ITEM_PATTERN, '').trim();
 }
 
 function compactLabelText(value) {
@@ -470,6 +470,73 @@ function cropRenderedPage(pageCanvas, viewport, box, scale) {
   };
 }
 
+function findRenderedRedPictogramBoxes(pageCanvas, viewport, labels) {
+  const { width, height } = pageCanvas;
+  const pixels = pageCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, width, height).data;
+  // Thin, anti-aliased vector diamonds may have sub-pixel gaps at the corners.
+  // Tile grouping keeps one diamond connected without merging adjacent symbols.
+  const tileSize = 4;
+  const maskWidth = Math.ceil(width / tileSize);
+  const maskHeight = Math.ceil(height / tileSize);
+  const redMask = new Uint8Array(maskWidth * maskHeight);
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const offset = (y * width + x) * 4;
+    const red = pixels[offset], green = pixels[offset + 1], blue = pixels[offset + 2];
+    if (red > 120 && red - green > 40 && red - blue > 40) {
+      redMask[Math.floor(y / tileSize) * maskWidth + Math.floor(x / tileSize)] = 1;
+    }
+  }
+  const groupedMask = new Uint8Array(redMask.length);
+  for (let index = 0; index < redMask.length; index += 1) {
+    if (!redMask[index]) continue;
+    const x = index % maskWidth, y = Math.floor(index / maskWidth);
+    for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+      const nextX = x + dx, nextY = y + dy;
+      if (nextX >= 0 && nextX < maskWidth && nextY >= 0 && nextY < maskHeight) {
+        groupedMask[nextY * maskWidth + nextX] = 1;
+      }
+    }
+  }
+  const visited = new Uint8Array(groupedMask.length);
+  const boxes = [];
+  for (let start = 0; start < groupedMask.length; start += 1) {
+    if (!groupedMask[start] || visited[start]) continue;
+    const queue = [start]; visited[start] = 1;
+    let cursor = 0, count = 0, left = maskWidth, right = 0, top = maskHeight, bottom = 0;
+    while (cursor < queue.length) {
+      const pixel = queue[cursor++];
+      const x = pixel % maskWidth;
+      const y = Math.floor(pixel / maskWidth);
+      count += 1;
+      left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y);
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        if (!dx && !dy) continue;
+        const nextX = x + dx, nextY = y + dy;
+        if (nextX < 0 || nextX >= maskWidth || nextY < 0 || nextY >= maskHeight) continue;
+        const next = nextY * maskWidth + nextX;
+        if (groupedMask[next] && !visited[next]) { visited[next] = 1; queue.push(next); }
+      }
+    }
+    const pixelLeft = left * tileSize;
+    const pixelTop = top * tileSize;
+    const pixelRight = Math.min(width, (right + 1) * tileSize);
+    const pixelBottom = Math.min(height, (bottom + 1) * tileSize);
+    if (count < 20 || pixelRight - pixelLeft < 40 || pixelBottom - pixelTop < 40) continue;
+    const componentWidth = pixelRight - pixelLeft;
+    const componentHeight = pixelBottom - pixelTop;
+    const segmentCount = componentWidth / componentHeight > 1.8
+      ? Math.max(2, Math.round(componentWidth / componentHeight)) : 1;
+    for (let segment = 0; segment < segmentCount; segment += 1) {
+      const segmentLeft = pixelLeft + componentWidth * segment / segmentCount;
+      const segmentRight = pixelLeft + componentWidth * (segment + 1) / segmentCount;
+      const first = viewport.convertToPdfPoint(segmentLeft, pixelTop);
+      const second = viewport.convertToPdfPoint(segmentRight, pixelBottom);
+      boxes.push({ x: Math.min(first[0], second[0]), y: Math.min(first[1], second[1]), width: Math.abs(second[0] - first[0]), height: Math.abs(second[1] - first[1]), sourceType: 'rendered-red-vector', operatorIndex: -1, objectName: null });
+    }
+  }
+  return boxes;
+}
+
 async function extractSectionTwoPictogramCrops(extracted, analysisResult) {
   const labels = getPictogramLabelRows(analysisResult);
   const crops = [];
@@ -480,16 +547,20 @@ async function extractSectionTwoPictogramCrops(extracted, analysisResult) {
     const page = await extracted.pdfDocument.getPage(pageNumber);
     const operatorList = await page.getOperatorList();
     const imageBoxes = collectPageImageBoxes(operatorList);
-    const pageCandidates = imageBoxes.filter((box) => pageLabels.some((label) => isSpatialPictogramCandidate(box, label)))
-      .filter((box, index, all) => all.findIndex((other) => Math.abs(other.x - box.x) < 0.5 && Math.abs(other.y - box.y) < 0.5 && Math.abs(other.width - box.width) < 0.5 && Math.abs(other.height - box.height) < 0.5) === index)
-      .sort((left, right) => left.x - right.x || right.y - left.y);
-    candidates.push(...pageCandidates.map((candidate) => ({ page: pageNumber, ...candidate })));
-    if (!pageCandidates.length) continue;
     const viewport = page.getViewport({ scale });
     const pageCanvas = document.createElement('canvas');
     pageCanvas.width = Math.ceil(viewport.width);
     pageCanvas.height = Math.ceil(viewport.height);
     await page.render({ canvasContext: pageCanvas.getContext('2d'), viewport }).promise;
+    const renderedBoxes = findRenderedRedPictogramBoxes(pageCanvas, viewport, pageLabels);
+    const pageCandidates = [...imageBoxes, ...renderedBoxes].filter((box) => pageLabels.some((label) => isSpatialPictogramCandidate(box, label)))
+      .filter((box, index, all) => all.findIndex((other) =>
+        Math.abs((other.x + other.width / 2) - (box.x + box.width / 2)) < 5 &&
+        Math.abs((other.y + other.height / 2) - (box.y + box.height / 2)) < 5 &&
+        Math.abs(other.width - box.width) < 8 && Math.abs(other.height - box.height) < 8) === index)
+      .sort((left, right) => left.x - right.x || right.y - left.y);
+    candidates.push(...pageCandidates.map((candidate) => ({ page: pageNumber, ...candidate })));
+    if (!pageCandidates.length) continue;
     pageCandidates.forEach((candidate) => {
       const rendered = cropRenderedPage(pageCanvas, viewport, candidate, scale);
       const hasPictogramAppearance = rendered.redRatio >= 0.002 && rendered.darkRatio >= 0.002;
@@ -685,7 +756,7 @@ function normalizeCodesInText(value) {
   return { original: value, normalized: normalizedValue, matches };
 }
 
-const PHONE_PATTERN = /(?<!\d)(?:\+?82\s*[-)]?\s*)?(?:\(\s*)?0\d{1,2}\s*\)?\s*(?:-|\s)\s*\d{3,4}\s*(?:-|\s)\s*\d{4}(?!\d)/;
+const PHONE_PATTERN = /(?<!\d)(?:(?:\+?82\s*[-)]?\s*)?(?:\(\s*)?0\d{1,2}\s*(?:\)\s*|[-\s])\s*\d{3,4}\s*(?:-|\s)\s*\d{4}|\+?82\s*[-)]?\s*\d{1,2}\s*(?:-|\s)\s*\d{3,4}\s*(?:-|\s)\s*\d{4}|0(?:2\d{7,8}|\d{9,10}))(?!\d)/;
 
 function normalizePhone(raw) {
   const value = raw.trim().replace(/\s+/g, ' ');
@@ -707,7 +778,7 @@ function extractPhone(value) {
 }
 
 function isSectionHeading(line, number) {
-  const value = normalized(line).replace(/[.·ㆍ:：()\-]/g, '');
+  const value = normalized(line).replace(/[.·ㆍ•:：()\-]/g, '');
   const titlePatterns = {
     1: /^화학제품(?:과|및)?회사(?:에관한)?정보$/,
     2: /^유해성?위험성$/,
@@ -803,7 +874,7 @@ function isPdfNoiseLine(line, repeatedNoise = new Set()) {
 }
 
 function getPrecautionCategory(line) {
-  const match = line.match(/^(?:[가-하]\.?\s*)?(?:예방조치\s*문구\s*\|\s*)?(예방|대응|저장|폐기)(?:\s*[|:：-]\s*|\s+(?=P\d{3})|\s*$)/);
+  const match = line.match(/^(?:(?:[가-하]\.?)|(?:\d{1,2}[.)]))?\s*(?:예방조치\s*문구\s*(?:\|\s*)?)?[\[［【(（]?\s*(예방|대응|저장|폐기)\s*[\]］】)）]?(?:\s*[|:：-]\s*|\s+(?=P\d{3})|\s*$)/);
   return match ? match[1] : '';
 }
 
@@ -975,7 +1046,7 @@ function parseStructuredStatements(sectionLines, prefix, furniture) {
 }
 
 function categoryFromCell(cell) {
-  const value = cleanLine(cell?.rawText || '').replace(/^[가-하]\.?\s*/, '').replace(/[|:：\-]/g, '').trim();
+  const value = cleanLine(cell?.rawText || '').replace(/^(?:(?:[가-하]\.?)|(?:\d{1,2}[.)]))\s*/, '').replace(/[\[\]［］【】()（）|:：\-]/g, '').trim();
   const match = value.match(/^(예방|대응|저장|폐기)(?:\s*해당\s*없음)?$/);
   return match ? match[1] : '';
 }
@@ -1009,7 +1080,8 @@ function categorizeStructuredPrecautions(statements, sectionLines, fallback) {
   statements.forEach((statement) => {
     const row = statement.startLine;
     const rowAnchors = anchors.filter((anchor) => anchor.sectionIndex === statement.sectionIndex);
-    let selected = rowAnchors[0] || null;
+    const precedingAnchor = [...anchors].reverse().find((anchor) => anchor.sectionIndex <= statement.sectionIndex);
+    let selected = rowAnchors[0] || precedingAnchor || null;
     let confidence = selected ? '높음' : '';
     if (!selected && Number.isFinite(row.y)) {
       const pageAnchors = anchors.filter((anchor) => anchor.page === row.pageNumber).sort((a, b) => b.y - a.y);
@@ -1079,7 +1151,7 @@ function collectCategorizedPrecautions(lines, repeatedNoise = new Set()) {
     if (category) {
       saveStatement();
       currentCategory = category;
-      line = cleanLine(line.replace(/^(?:[가-하]\.?\s*)?(?:예방조치\s*문구\s*\|\s*)?(?:예방|대응|저장|폐기)(?:\s*[|:：-]\s*|\s+(?=P\d{3})|\s*$)/, ''));
+      line = cleanLine(line.replace(/^(?:(?:[가-하]\.?)|(?:\d{1,2}[.)]))?\s*(?:예방조치\s*문구\s*(?:\|\s*)?)?[\[［【(（]?\s*(?:예방|대응|저장|폐기)\s*[\]］】)）]?(?:\s*[|:：-]\s*|\s+(?=P\d{3})|\s*$)/, ''));
       if (!line) return;
     }
     if (/^P\d{3}(?:\+P\d{3})*\b/i.test(line)) {
@@ -1117,19 +1189,26 @@ function extractSupplierData(lines) {
   const preferredSupplierPatterns = [
     /^(?:[가-하]\.?)?\s*공급자정보\s*(?:[|:：]\s*)?/i,
     /^(?:[가-하]\.?)?\s*(?:유통회사명|공급회사명?|공급자명|유통업자명)\s*(?:[|:：]\s*)?/i,
-    /^(?:[가-하]\.?)?\s*(?:공급자|유통업자)(?=\s*[|:：])\s*(?:[|:：]\s*)?/i
+    /^(?:[가-하]\.?)?\s*(?:공급자|유통업자)(?=\s*[|:：])\s*(?:[|:：]\s*)?/i,
+    /^(?:[○●◎◇◆□■△▲▽▼※]\s*)?(?:생산\s*및\s*)?공급\s*회사명\s*(?:[|:：]\s*)?/i
   ];
   const manufacturerPatterns = [
+    /^(?:[○●◎◇◆□■△▲▽▼※]\s*)?(?:생산\s*및\s*)?공급\s*회사명\s*(?:[|:：]\s*)?/i,
     /^(?:[가-하]\.?)?\s*(?:제조회사명|제조사명|공급자명|유통업자명|회사명|제조자명)\s*(?:[|:：]\s*)?/i,
     /^(?:[가-하]\.?)?\s*제조자\s*(?:[|:：]\s*)?/i
   ];
   let supplierName = extractFieldValue(lines, preferredSupplierPatterns, 2) || extractFieldValue(lines, manufacturerPatterns, 2);
-  const invalidSupplier = (value) => !value || /수입품|정보\s*기재|긴급\s*연락\s*가능/i.test(value) || /^(?:정보|배급업자|유통업자|제조자)$/i.test(value);
+  const invalidSupplier = (value) => {
+    const compact = cleanLine(value).replace(/[\s|/:：·ㆍ・()（）-]/g, '');
+    return !value || /수입품|정보\s*기재|긴급\s*연락\s*가능/i.test(value)
+      || /^(?:정보|배급업자|유통업자|제조자)$/i.test(value)
+      || /^(?:(?:제조자)?수입자유통업자정보|공급자유통(?:업자)?정보)$/i.test(compact);
+  };
   if (invalidSupplier(supplierName)) {
-    supplierName = lines.map((line) => {
+    supplierName = extractFieldValue(lines, manufacturerPatterns, 2) || lines.map((line) => {
       const match = line.match(/^공급자\s*\|\s*(.+)$/i);
       return match ? match[1].split(/\s*\|\s*/)[0].trim() : '';
-    }).find((candidate) => !invalidSupplier(candidate)) || '';
+    }).filter((candidate) => !invalidSupplier(candidate)).at(-1) || '';
   }
   const supplierHeadingIndex = lines.findIndex((line) => /공급자\s*\/?\s*유통업자\s*정보|공급자\s*정보|공급자정보|제조자\s*정보/i.test(line));
   if (!supplierName && supplierHeadingIndex >= 0) {
@@ -1324,15 +1403,6 @@ function renderSelectedPictograms() {
         : pictogramCandidates.has(code) ? '확인 필요' : '';
     badge.dataset.grade = source === '직접 선택' ? 'manual' : (grade || '');
   });
-  previewPictograms.replaceChildren(...(selected.length
-    ? selected.map((pictogram) => {
-      const image = document.createElement('img');
-      image.src = pictogram.asset;
-      image.alt = `${pictogram.name} (${pictogram.code})`;
-      return image;
-    })
-    : [Object.assign(document.createElement('span'), { className: 'no-pictogram', textContent: '확인된 그림문자 없음' })]));
-
   const resultRows = selected.map((pictogram) => {
       const row = document.createElement('div');
       row.className = 'identified-pictogram';
@@ -1363,11 +1433,13 @@ function renderSelectedPictograms() {
   statusPictograms.textContent = selected.length
     ? `${selected.length}개 선택됨`
     : pictogramCandidates.size || unresolvedPictogramCount ? '확인 필요' : '선택 없음';
+  renderPrintPreview();
 }
 
 function classifyPictogramComparison(comparison) {
   const reliableCrop = comparison.detectionConfidence === 'high';
   if (!reliableCrop || comparison.first.score < 0.45 || comparison.scoreGap < 0.10) return 'C';
+  if (comparison.first.score >= 0.75 && comparison.scoreGap >= 0.20) return 'A';
   if (comparison.first.score >= 0.65 && comparison.scoreGap >= 0.25) return 'A';
   return 'B';
 }
@@ -1564,6 +1636,160 @@ function renderSupplierPreview(value) {
   phoneTarget.classList.toggle('empty-value', !phone);
 }
 
+function parseSupplier(value) {
+  const phoneMatch = value.match(/(?:\+?82[-\s]?)?(?:0\d{1,2})[-\s)]?\d{3,4}[-\s]?\d{4}/);
+  const phone = phoneMatch?.[0]?.trim() || '';
+  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const supplierLine = lines.find((line) => /공급자|회사명|제조자/i.test(line)) || lines[0] || '';
+  const name = supplierLine.replace(/^(?:공급자|회사명|제조자)(?:\s*정보)?\s*[:：]?\s*/i, '')
+    .split(/(?:연락처|전화|긴급전화|주소)\s*[:：]?/i)[0].replace(phone, '').trim();
+  return { name, phone };
+}
+
+function getFinalWarningLabelData() {
+  const precautionValue = document.querySelector('#precaution-statements').value.trim();
+  const parsed = collectCategorizedPrecautions(precautionValue.split(/\r?\n/));
+  const precautions = Object.entries(parsed.categories)
+    .filter(([, statements]) => statements.length)
+    .map(([category, statements]) => ({ category, statements: [...statements] }));
+  const supplier = parseSupplier(document.querySelector('#supplier-info').value.trim());
+  return {
+    productName: document.querySelector('#product-name').value.trim(),
+    ghsCodes: GHS_PICTOGRAMS.filter((item) => pictogramSources.has(item.code)).map((item) => item.code),
+    signalWord: document.querySelector('#signal-word').value.trim(),
+    hazardStatements: document.querySelector('#hazard-statements').value.trim(),
+    precautions,
+    supplierName: supplier.name,
+    supplierPhone: supplier.phone
+  };
+}
+
+function appendTextElement(parent, tag, className, text, emptyText = '') {
+  const element = document.createElement(tag);
+  element.className = className + (!text ? ' empty-value' : '');
+  element.textContent = text || emptyText;
+  parent.append(element);
+  return element;
+}
+
+function createWarningLabel(data, outputMode = 'screen') {
+  const label = document.createElement('article');
+  label.className = 'warning-label';
+  label.dataset.outputMode = outputMode;
+  appendTextElement(label, 'div', 'warning-label-title', '산업안전보건법 제115조 규정에 의한 경고표지');
+  appendTextElement(label, 'div', 'preview-product', data.productName, '제품명');
+  const symbolSignal = document.createElement('div');
+  symbolSignal.className = `preview-symbol-signal${data.ghsCodes.length ? '' : ' no-ghs'}`;
+  if (data.ghsCodes.length) {
+    const symbols = document.createElement('div');
+    symbols.className = 'preview-pictograms';
+    data.ghsCodes.forEach((code) => {
+      const pictogram = GHS_PICTOGRAMS.find((item) => item.code === code);
+      const image = document.createElement('img');
+      image.src = pictogram.asset;
+      image.alt = `${pictogram.name} (${pictogram.code})`;
+      image.dataset.ghsCode = code;
+      symbols.append(image);
+    });
+    symbolSignal.append(symbols);
+  }
+  const signal = document.createElement('div');
+  signal.className = 'signal-block';
+  const signalLabel = document.createElement('strong');
+  signalLabel.className = 'signal-label';
+  signalLabel.setAttribute('aria-label', '신호어');
+  signalLabel.append(...[...'신호어'].map((character) => {
+    const span = document.createElement('span');
+    span.textContent = character;
+    return span;
+  }));
+  signal.append(signalLabel);
+  appendTextElement(signal, 'div', 'preview-signal', data.signalWord);
+  symbolSignal.append(signal);
+  label.append(symbolSignal);
+  const hazard = document.createElement('section');
+  hazard.className = 'preview-hazard-section';
+  appendTextElement(hazard, 'strong', '', '유해·위험문구');
+  appendTextElement(hazard, 'p', '', data.hazardStatements, 'MSDS에서 확인한 내용을 입력하세요.');
+  label.append(hazard);
+  const precaution = document.createElement('section');
+  precaution.className = 'preview-precaution-section';
+  appendTextElement(precaution, 'strong', '', '예방조치문구');
+  const groups = document.createElement('div');
+  groups.className = 'precaution-groups';
+  if (data.precautions.length) data.precautions.forEach(({ category, statements }) => {
+    const group = document.createElement('section');
+    group.className = 'precaution-group';
+    appendTextElement(group, 'h4', '', category);
+    appendTextElement(group, 'p', '', statements.join('\n'));
+    groups.append(group);
+  });
+  else appendTextElement(groups, 'p', 'empty-value', '', '분류가 확인된 예방조치문구가 없습니다.');
+  precaution.append(groups);
+  label.append(precaution);
+  const supplier = document.createElement('div');
+  supplier.className = 'preview-supplier';
+  appendTextElement(supplier, 'strong', '', '공급자 :');
+  appendTextElement(supplier, 'span', '', data.supplierName);
+  appendTextElement(supplier, 'strong', '', '연락처 :');
+  appendTextElement(supplier, 'span', '', data.supplierPhone);
+  label.append(supplier);
+  return label;
+}
+
+function createPrintSheet(data, layout, outputMode = 'screen') {
+  const sheet = document.createElement('div');
+  sheet.className = 'print-sheet';
+  sheet.dataset.size = layout.name;
+  sheet.dataset.outputMode = outputMode;
+  sheet.style.setProperty('--sheet-ratio', `${layout.pageWidth} / ${layout.pageHeight}`);
+  sheet.style.setProperty('--sheet-columns', layout.columns);
+  sheet.style.setProperty('--sheet-rows', layout.rows);
+  sheet.style.setProperty('--sheet-margin-mm', `${layout.margin}mm`);
+  sheet.style.setProperty('--sheet-gap-mm', `${layout.gap}mm`);
+  sheet.style.setProperty('--sheet-margin-percent', `${layout.margin / layout.pageWidth * 100}%`);
+  sheet.style.setProperty('--sheet-gap-percent', `${layout.gap / layout.pageWidth * 100}%`);
+  for (let index = 0; index < layout.count; index += 1) sheet.append(createWarningLabel(data, outputMode));
+  return sheet;
+}
+
+function renderPrintPreview() {
+  if (!printPreview) return;
+  const layout = getSelectedLabelSize();
+  if (!layout) {
+    previewResizeObserver?.disconnect();
+    return printPreview.replaceChildren();
+  }
+  previewWarningLabelData = getFinalWarningLabelData();
+  const sheet = createPrintSheet(previewWarningLabelData, layout, 'screen');
+  const logicalWidth = Math.round(layout.pageWidth / 25.4 * 96);
+  const logicalHeight = Math.round(layout.pageHeight / 25.4 * 96);
+  const stage = document.createElement('div');
+  stage.className = 'print-sheet-preview-stage';
+  sheet.style.width = `${logicalWidth}px`;
+  sheet.style.height = `${logicalHeight}px`;
+  stage.append(sheet);
+  printPreview.replaceChildren(stage);
+  const scalePreview = () => {
+    const previewStyle = getComputedStyle(printPreview);
+    const availableWidth = printPreview.clientWidth - parseFloat(previewStyle.paddingLeft) - parseFloat(previewStyle.paddingRight);
+    const scale = Math.min(1, availableWidth / logicalWidth);
+    stage.style.width = `${logicalWidth * scale}px`;
+    stage.style.height = `${logicalHeight * scale}px`;
+    sheet.style.transform = `scale(${scale})`;
+  };
+  previewResizeObserver?.disconnect();
+  previewResizeObserver = new ResizeObserver(scalePreview);
+  previewResizeObserver.observe(printPreview);
+  scalePreview();
+  requestAnimationFrame(() => {
+    const fit = fitOutputLabels(sheet);
+    sheet.classList.toggle('content-overflow', !fit.fits);
+    sheet.title = fit.fits ? '' : '이 출력 크기에는 내용이 너무 많습니다. 더 큰 출력 크기를 선택해주세요.';
+    scalePreview();
+  });
+}
+
 function getAnalysisErrorMessage(error) {
   const name = error?.name || '';
   if (name === 'PasswordException') return '암호로 보호된 PDF는 현재 읽을 수 없습니다. 암호를 해제한 파일로 다시 시도해 주세요.';
@@ -1636,9 +1862,8 @@ analyzeButton.addEventListener('click', async () => {
     rawTextContent.textContent = rawText || '(추출된 텍스트가 없습니다.)';
     rawTextSummary.textContent = `${extracted.pageCount}페이지 · ${diagnostics.totalLength.toLocaleString('ko-KR')}자`;
     const selectedSize = getSelectedLabelSize();
-    selectedSizeText.textContent = `${selectedSize.name} · ${selectedSize.width} × ${selectedSize.height} mm`;
-    const warningLabel = document.querySelector('.warning-label');
-    applyLabelSizeVariables(warningLabel, selectedSize);
+    selectedSizeText.textContent = `${selectedSize.name} · ${selectedSize.description}`;
+    renderPrintPreview();
     results.hidden = false;
     if (diagnostics.isLikelyScanned) {
       analysisWarning.textContent = '텍스트를 충분히 추출하지 못했습니다. 이미지형 또는 스캔형 MSDS일 수 있습니다.';
@@ -1673,18 +1898,7 @@ const emptyMessages = {
 
 document.querySelectorAll('.preview-source').forEach((input) => {
   input.addEventListener('input', () => {
-    const value = input.value.trim();
-    if (input.dataset.preview === 'precaution-categories') {
-      renderPrecautionPreview(value);
-    } else if (input.dataset.preview === 'preview-supplier') {
-      renderSupplierPreview(value);
-    } else {
-      const preview = document.querySelector(`#${input.dataset.preview}`);
-      preview.textContent = value || emptyMessages[input.dataset.preview];
-      preview.classList.toggle('empty-value', !value);
-    }
-    const totalCopyLength = document.querySelector('#hazard-statements').value.length + document.querySelector('#precaution-statements').value.length;
-    document.querySelector('.warning-label').dataset.density = totalCopyLength > 1200 ? 'dense' : totalCopyLength > 700 ? 'compact' : 'normal';
+    renderPrintPreview();
   });
 });
 
@@ -1700,66 +1914,162 @@ function safePdfFilename(productName) {
   return safeName ? `경고표지_${safeName}.pdf` : '경고표지.pdf';
 }
 
-function fitPdfLabelContent(label) {
-  const scalableElements = [...label.querySelectorAll([
-    '.warning-label-title', '.preview-product', '.preview-pictograms img',
-    '.signal-block > strong', '.preview-signal',
-    '.preview-hazard-section > strong', '.preview-precaution-section > strong',
-    '.preview-hazard-section p', '.precaution-group h4', '.precaution-group p',
-    '.preview-supplier', '.preview-supplier strong'
-  ].join(','))];
-  const originalFontSizes = scalableElements.map((element) => parseFloat(getComputedStyle(element).fontSize));
-  const hazardSection = label.querySelector('.preview-hazard-section');
-  const precautionSection = label.querySelector('.preview-precaution-section');
-  const supplier = label.querySelector('.preview-supplier');
-  const symbolSignal = label.querySelector('.preview-symbol-signal');
-  let factor = 1;
-  const applyFactor = () => {
-    scalableElements.forEach((element, index) => {
-      if (element.matches('.preview-pictograms img')) {
-        element.style.width = `${Math.max(42, originalFontSizes[index] * 5.5 * factor)}px`;
-      } else {
-        element.style.fontSize = `${Math.max(9, originalFontSizes[index] * factor)}px`;
-      }
-    });
-    const sectionPadding = Math.max(7, 15 * factor);
-    hazardSection.style.padding = `${sectionPadding}px ${Math.max(9, 18 * factor)}px`;
-    precautionSection.style.padding = `${sectionPadding}px ${Math.max(9, 18 * factor)}px`;
-    supplier.style.padding = `${Math.max(6, 11 * factor)}px ${Math.max(8, 16 * factor)}px`;
-    symbolSignal.style.minHeight = `${Math.max(82, 145 * factor)}px`;
+function warningDataSummary(data) {
+  const byCategory = Object.fromEntries(['예방', '대응', '저장', '폐기'].map((category) => [
+    category, data.precautions.find((group) => group.category === category)?.statements.length || 0
+  ]));
+  return {
+    productName: data.productName, ghsCodes: [...data.ghsCodes], ghsCount: data.ghsCodes.length,
+    signalWord: data.signalWord,
+    hazardCount: data.hazardStatements ? data.hazardStatements.split(/\r?\n/).filter(Boolean).length : 0,
+    precautionCount: data.precautions.reduce((sum, group) => sum + group.statements.length, 0),
+    preventionCount: byCategory.예방, responseCount: byCategory.대응,
+    storageCount: byCategory.저장, disposalCount: byCategory.폐기,
+    supplier: data.supplierName, contact: data.supplierPhone
   };
-  applyFactor();
-  while (label.scrollHeight > label.clientHeight + 1 && factor > 0.55) {
-    factor = Math.max(0.55, factor - 0.05);
-    applyFactor();
-  }
-  return { fits: label.scrollHeight <= label.clientHeight + 1, scale: factor };
 }
 
-async function createPdfRenderClone(size) {
-  const source = document.querySelector('.warning-label');
-  const clone = source.cloneNode(true);
-  const logicalWidth = 720;
-  const logicalHeight = Math.max(320, Math.round(logicalWidth * size.height / size.width));
-  clone.removeAttribute('id');
-  clone.classList.add('pdf-render-label');
-  clone.style.width = `${logicalWidth}px`;
-  clone.style.height = `${logicalHeight}px`;
-  clone.style.overflow = 'hidden';
-  clone.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
-  const pictogramArea = clone.querySelector('.preview-pictograms');
-  const selectedPictograms = pictogramArea.querySelectorAll('img');
-  if (!selectedPictograms.length) {
-    pictogramArea.remove();
-    const symbolSignal = clone.querySelector('.preview-symbol-signal');
-    symbolSignal.style.gridTemplateColumns = '1fr';
-  } else {
-    clone.querySelector('.no-pictogram')?.remove();
+function assertSameWarningData(previewData, pdfData) {
+  const preview = warningDataSummary(previewData);
+  const pdf = warningDataSummary(pdfData);
+  console.groupCollapsed('[HSSO Preview ↔ PDF 데이터 검증]');
+  console.table({ preview, pdf });
+  console.groupEnd();
+  if (JSON.stringify(preview) !== JSON.stringify(pdf)) {
+    throw new Error('미리보기와 PDF 데이터가 일치하지 않아 출력을 중단했습니다. 화면을 새로 확인해 주세요.');
   }
-  document.body.append(clone);
+}
+
+function fitOutputLabels(sheet) {
+  const steps = ['normal', 'compact', 'dense'];
+  for (const density of steps) {
+    sheet.querySelectorAll('.warning-label').forEach((label) => { label.dataset.density = density; });
+    const fits = [...sheet.querySelectorAll('.warning-label')].every((label) => {
+      const regions = [label, ...label.querySelectorAll('.preview-hazard-section, .preview-precaution-section, .precaution-groups')];
+      return regions.every((region) => region.scrollHeight <= region.clientHeight + 1 && region.scrollWidth <= region.clientWidth + 1);
+    });
+    if (fits) return { fits: true, density };
+  }
+  return { fits: false, density: 'dense' };
+}
+
+async function waitForOutputImages(root) {
   await document.fonts?.ready;
-  await Promise.all([...clone.querySelectorAll('img')].map((image) => image.decode?.().catch(() => undefined)));
-  return { clone, logicalWidth, logicalHeight, fit: fitPdfLabelContent(clone) };
+  await Promise.all([...root.querySelectorAll('img')].map(async (image) => {
+    if (!image.complete) await new Promise((resolve, reject) => {
+      image.addEventListener('load', resolve, { once: true });
+      image.addEventListener('error', reject, { once: true });
+    });
+    if (image.decode) await image.decode();
+    if (!image.naturalWidth || !image.naturalHeight) throw new Error(`GHS 이미지 준비 실패: ${image.dataset.ghsCode || image.alt}`);
+  }));
+}
+
+async function rasterizeOutputPictograms(root) {
+  await Promise.all([...root.querySelectorAll('img[data-ghs-code]')].map(async (image) => {
+    const sourceUrl = image.getAttribute('src');
+    const source = new Image();
+    source.src = sourceUrl;
+    await source.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    image.dataset.sourceSrc = sourceUrl;
+    image.src = canvas.toDataURL('image/png');
+    await image.decode();
+  }));
+}
+
+function inspectPdfRenderGeometry(sheet, data, layout) {
+  const sheetRect = sheet.getBoundingClientRect();
+  const labels = [...sheet.querySelectorAll('.warning-label')];
+  const expectedImageCount = data.ghsCodes.length * layout.count;
+  const images = [...sheet.querySelectorAll('img[data-ghs-code]')];
+  const imageDetails = images.map((image) => {
+    const style = getComputedStyle(image);
+    const rect = image.getBoundingClientRect();
+    return {
+      code: image.dataset.ghsCode,
+      sourceSrc: image.dataset.sourceSrc || '',
+      renderedSrc: image.currentSrc || image.src,
+      naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+      display: style.display, visibility: style.visibility, opacity: style.opacity,
+      width: rect.width, height: rect.height, left: rect.left, top: rect.top
+    };
+  });
+  const labelDetails = labels.map((label) => {
+    const rect = label.getBoundingClientRect();
+    const supplierRect = label.querySelector('.preview-supplier').getBoundingClientRect();
+    return { width: rect.width, height: rect.height, supplierBottomGap: rect.bottom - supplierRect.bottom };
+  });
+  console.groupCollapsed('[HSSO PDF 캡처 직전 실제 DOM 검증]');
+  console.table(imageDetails);
+  console.table(labelDetails);
+  console.groupEnd();
+  const expectedCodes = Array.from({ length: layout.count }, () => data.ghsCodes).flat();
+  if (images.length !== expectedImageCount || imageDetails.some((item, index) =>
+    item.code !== expectedCodes[index] || !item.sourceSrc || !item.renderedSrc || !item.naturalWidth || !item.naturalHeight ||
+    item.display === 'none' || item.visibility === 'hidden' || Number(item.opacity) <= 0 || item.width <= 0 || item.height <= 0)) {
+    throw new Error('PDF 출력 DOM에서 GHS 그림문자 렌더링 상태가 올바르지 않아 생성을 중단했습니다.');
+  }
+  if (!sheetRect.width || !sheetRect.height || labelDetails.some((item) => item.height <= 0 || Math.abs(item.supplierBottomGap) > 2)) {
+    throw new Error('PDF 출력 DOM에서 공급자 행이 경고표지 최하단에 배치되지 않아 생성을 중단했습니다.');
+  }
+  return {
+    sheetRect,
+    sheetSize: { width: sheetRect.width, height: sheetRect.height },
+    imageDetails,
+    labelDetails
+  };
+}
+
+function verifyCanvasPictograms(canvas, geometry) {
+  const scaleX = canvas.width / geometry.sheetRect.width;
+  const scaleY = canvas.height / geometry.sheetRect.height;
+  const results = geometry.imageDetails.map((item) => {
+    const x = Math.max(0, Math.floor((item.left - geometry.sheetRect.left) * scaleX));
+    const y = Math.max(0, Math.floor((item.top - geometry.sheetRect.top) * scaleY));
+    const width = Math.min(canvas.width - x, Math.max(1, Math.floor(item.width * scaleX)));
+    const height = Math.min(canvas.height - y, Math.max(1, Math.floor(item.height * scaleY)));
+    const pixels = canvas.getContext('2d').getImageData(x, y, width, height).data;
+    let redPixels = 0;
+    let darkPixels = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const red = pixels[index];
+      const green = pixels[index + 1];
+      const blue = pixels[index + 2];
+      const alpha = pixels[index + 3];
+      if (alpha > 0 && red > 150 && green < 130 && blue < 130) redPixels += 1;
+      if (alpha > 0 && red < 110 && green < 110 && blue < 110) darkPixels += 1;
+    }
+    return { code: item.code, width, height, redPixels, darkPixels };
+  });
+  console.table(results);
+  if (results.some((item) => item.redPixels < 25 || item.darkPixels < 25)) {
+    throw new Error('html2canvas 결과에서 일부 GHS 그림문자가 확인되지 않아 PDF 생성을 중단했습니다.');
+  }
+  return results;
+}
+
+async function createPdfRenderSheet(data, layout) {
+  const sheet = createPrintSheet(data, layout, 'pdf');
+  sheet.classList.add('pdf-render-sheet');
+  const logicalWidth = Math.round(layout.pageWidth / 25.4 * 96);
+  const logicalHeight = Math.round(layout.pageHeight / 25.4 * 96);
+  sheet.style.width = `${logicalWidth}px`;
+  sheet.style.height = `${logicalHeight}px`;
+  document.body.append(sheet);
+  await waitForOutputImages(sheet);
+  await rasterizeOutputPictograms(sheet);
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const fit = fitOutputLabels(sheet);
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const geometry = inspectPdfRenderGeometry(sheet, data, layout);
+  return { sheet, logicalWidth, logicalHeight, fit, geometry };
 }
 
 async function downloadWarningLabelPdf() {
@@ -1780,40 +2090,58 @@ async function downloadWarningLabelPdf() {
   }
   downloadPdfButton.disabled = true;
   downloadPdfButton.textContent = 'PDF 생성 중...';
-  let renderClone;
+  let renderSheet;
   try {
-    renderClone = await createPdfRenderClone(size);
-    if (!renderClone.fit.fits) {
-      throw new Error('선택한 크기에 비해 문구가 너무 많아 내용이 잘릴 수 있습니다. 더 큰 출력 크기를 선택하거나 문구 배치를 확인해 주세요.');
-    }
-    const targetWidthPixels = size.width / 25.4 * 300;
-    const targetHeightPixels = size.height / 25.4 * 300;
+    const previewData = previewWarningLabelData || getFinalWarningLabelData();
+    const pdfData = structuredClone(previewData);
+    assertSameWarningData(previewData, getFinalWarningLabelData());
+    assertSameWarningData(previewData, pdfData);
+    renderSheet = await createPdfRenderSheet(pdfData, size);
+    if (!renderSheet.fit.fits) throw new Error('이 출력 크기에는 내용이 너무 많습니다. 더 큰 출력 크기를 선택해주세요.');
+    const targetWidthPixels = size.pageWidth / 25.4 * 300;
+    const targetHeightPixels = size.pageHeight / 25.4 * 300;
     const renderScale = Math.min(
-      targetWidthPixels / renderClone.logicalWidth,
-      targetHeightPixels / renderClone.logicalHeight,
-      5000 / Math.max(renderClone.logicalWidth, renderClone.logicalHeight)
+      targetWidthPixels / renderSheet.logicalWidth,
+      targetHeightPixels / renderSheet.logicalHeight,
+      5000 / Math.max(renderSheet.logicalWidth, renderSheet.logicalHeight)
     );
-    const canvas = await window.html2canvas(renderClone.clone, {
+    const canvas = await window.html2canvas(renderSheet.sheet, {
       backgroundColor: '#ffffff',
       logging: false,
       scale: renderScale,
       useCORS: true,
-      width: renderClone.logicalWidth,
-      height: renderClone.logicalHeight,
-      windowWidth: renderClone.logicalWidth,
-      windowHeight: renderClone.logicalHeight
+      width: renderSheet.logicalWidth,
+      height: renderSheet.logicalHeight,
+      windowWidth: renderSheet.logicalWidth,
+      windowHeight: renderSheet.logicalHeight,
+      onclone: (clonedDocument) => {
+        const originalCanvases = [...renderSheet.sheet.querySelectorAll('canvas')];
+        clonedDocument.querySelectorAll('.pdf-render-sheet canvas').forEach((canvasClone, index) => {
+          const source = originalCanvases[index];
+          canvasClone.getContext('2d').drawImage(source, 0, 0);
+        });
+      }
     });
-    const orientation = size.width > size.height ? 'landscape' : 'portrait';
-    const pdf = new window.jspdf.jsPDF({ orientation, unit: 'mm', format: [size.width, size.height], compress: true });
+    const canvasPictograms = verifyCanvasPictograms(canvas, renderSheet.geometry);
+    window.__hssoLastPdfRenderAudit = {
+      dom: {
+        sheetSize: renderSheet.geometry.sheetSize,
+        images: renderSheet.geometry.imageDetails,
+        labels: renderSheet.geometry.labelDetails
+      },
+      canvas: canvasPictograms
+    };
+    const orientation = size.pageWidth > size.pageHeight ? 'landscape' : 'portrait';
+    const pdf = new window.jspdf.jsPDF({ orientation, unit: 'mm', format: [size.pageWidth, size.pageHeight], compress: true });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    if (Math.abs(pageWidth - size.width) > 0.02 || Math.abs(pageHeight - size.height) > 0.02) {
+    if (Math.abs(pageWidth - size.pageWidth) > 0.02 || Math.abs(pageHeight - size.pageHeight) > 0.02) {
       throw new Error('선택한 출력 크기로 PDF 페이지를 만들지 못했습니다. 크기 값을 확인해 주세요.');
     }
-    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, size.width, size.height, undefined, 'FAST');
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, size.pageWidth, size.pageHeight, undefined, 'FAST');
     const productName = document.querySelector('#product-name').value;
     pdf.save(safePdfFilename(productName));
-    pdfDownloadMessage.textContent = `${size.width} × ${size.height} mm PDF를 생성했습니다.`;
+    pdfDownloadMessage.textContent = `${size.pageWidth} × ${size.pageHeight} mm · 경고표지 ${size.count}개 PDF를 생성했습니다.`;
     pdfDownloadMessage.hidden = false;
   } catch (error) {
     console.error('경고표지 PDF 생성 오류:', error);
@@ -1821,53 +2149,13 @@ async function downloadWarningLabelPdf() {
     pdfDownloadMessage.classList.add('error');
     pdfDownloadMessage.hidden = false;
   } finally {
-    renderClone?.clone.remove();
+    renderSheet?.sheet.remove();
     downloadPdfButton.disabled = false;
     downloadPdfButton.textContent = 'PDF 다운로드';
   }
 }
 
 downloadPdfButton.addEventListener('click', downloadWarningLabelPdf);
-
-// 직접 입력 크기는 인쇄 직전에 실제 mm 단위로 적용하고, 최소 9px까지 문구를 맞춘다.
-let printStyleBackup = null;
-window.addEventListener('beforeprint', () => {
-  const warningLabel = document.querySelector('.warning-label');
-  const paragraphs = warningLabel.querySelectorAll('.preview-hazard-section p, .precaution-group p');
-  printStyleBackup = {
-    width: warningLabel.style.width,
-    height: warningLabel.style.height,
-    minHeight: warningLabel.style.minHeight,
-    overflow: warningLabel.style.overflow,
-    fontSizes: [...paragraphs].map((paragraph) => paragraph.style.fontSize)
-  };
-  const selectedSize = getSelectedLabelSize();
-  if (selectedSize) {
-    warningLabel.style.width = `${selectedSize.width}mm`;
-    warningLabel.style.height = `${selectedSize.height}mm`;
-    warningLabel.style.minHeight = '0';
-  }
-  let fontSize = 11;
-  paragraphs.forEach((paragraph) => { paragraph.style.fontSize = `${fontSize}px`; });
-  while (warningLabel.scrollHeight > warningLabel.clientHeight && fontSize > 9) {
-    fontSize -= 0.5;
-    paragraphs.forEach((paragraph) => { paragraph.style.fontSize = `${fontSize}px`; });
-  }
-  // 최소 크기에서도 넘치면 자르지 않고 보이도록 하여 사용자가 인쇄 전에 확인할 수 있게 한다.
-  if (warningLabel.scrollHeight > warningLabel.clientHeight) warningLabel.style.overflow = 'visible';
-});
-
-window.addEventListener('afterprint', () => {
-  if (!printStyleBackup) return;
-  const warningLabel = document.querySelector('.warning-label');
-  const paragraphs = warningLabel.querySelectorAll('.preview-hazard-section p, .precaution-group p');
-  warningLabel.style.width = printStyleBackup.width;
-  warningLabel.style.height = printStyleBackup.height;
-  warningLabel.style.minHeight = printStyleBackup.minHeight;
-  warningLabel.style.overflow = printStyleBackup.overflow;
-  paragraphs.forEach((paragraph, index) => { paragraph.style.fontSize = printStyleBackup.fontSizes[index]; });
-  printStyleBackup = null;
-});
 
 rawTextToggle.addEventListener('click', () => {
   const willOpen = rawTextPanel.hidden;
