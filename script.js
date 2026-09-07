@@ -2781,10 +2781,14 @@ document.querySelectorAll('[data-coming-soon]').forEach((link) => {
 
 const appViews = {
   maker: document.querySelector('#maker'),
-  'process-guide': document.querySelector('#process-guide')
+  'process-guide': document.querySelector('#process-guide'),
+  'risk-assessment': document.querySelector('#risk-assessment'),
+  'risk-survey-create': document.querySelector('#risk-survey-create'),
+  'risk-survey-preview': document.querySelector('#risk-survey-preview')
 };
 
 function showAppView(viewName) {
+  if (viewName === 'risk-survey-preview') prepareWorkerSurveyPreview();
   const nextView = appViews[viewName] || appViews.maker;
   Object.values(appViews).forEach((view) => {
     view.hidden = view !== nextView;
@@ -2814,3 +2818,91 @@ window.addEventListener('popstate', () => {
 });
 
 if (window.location.hash === '#process-guide') showAppView('process-guide');
+if (window.location.hash === '#risk-assessment') showAppView('risk-assessment');
+if (window.location.hash === '#risk-survey-create') showAppView('risk-survey-create');
+
+document.querySelector('#risk-survey-form').addEventListener('submit', (event) => event.preventDefault());
+
+['before', 'after'].forEach((phase) => {
+  const likelihood = document.querySelector(`#${phase}-likelihood`);
+  const severity = document.querySelector(`#${phase}-severity`);
+  const score = document.querySelector(`#${phase}-risk-score`);
+  const updateScore = () => {
+    score.value = likelihood.value && severity.value
+      ? `발생 가능성 ${likelihood.value} × 중대성 ${severity.value} = 위험성 ${Number(likelihood.value) * Number(severity.value)}`
+      : '발생 가능성과 중대성을 모두 선택해주세요.';
+  };
+  likelihood.addEventListener('change', updateScore);
+  severity.addEventListener('change', updateScore);
+});
+
+function prepareWorkerSurveyPreview() {
+  const value = (id) => document.getElementById(id).value.trim();
+  document.querySelector('#worker-survey-title').textContent = value('survey-title') || '위험성평가 설문';
+  document.querySelector('#worker-survey-target').textContent = value('survey-target') || '대상 미입력';
+  document.querySelector('#worker-survey-period').textContent = `${value('survey-start-date') || '시작일 미입력'} ~ ${value('survey-end-date') || '종료일 미입력'}`;
+  document.querySelector('#worker-survey-description').textContent = value('survey-description');
+  let participantCount = 0;
+  [['survey-collect-name', 'worker-name'], ['survey-collect-department', 'worker-department'], ['survey-collect-employee-id', 'worker-employee-id']].forEach(([setting, inputId]) => {
+    const enabled = document.getElementById(setting).checked;
+    document.getElementById(`${inputId}-field`).hidden = !enabled;
+    document.getElementById(inputId).disabled = !enabled;
+    if (enabled) participantCount += 1;
+  });
+  const anonymous = document.querySelector('#survey-allow-anonymous').checked;
+  document.querySelector('#worker-anonymous-note').textContent = anonymous
+    ? '익명 응답이 허용됩니다. 이름과 사번을 비워두어도 됩니다.'
+    : '설정된 참여자 정보를 작성해주세요.';
+  document.querySelector('#worker-participants').hidden = !participantCount && !anonymous;
+  const photoAllowed = document.querySelector('#survey-allow-photo').checked;
+  document.querySelector('#worker-photo-field').hidden = !photoAllowed;
+  document.querySelector('#worker-photo').disabled = !photoAllowed;
+  document.querySelector('#worker-submit-message').hidden = true;
+}
+
+function appendWorkerChoice(container, name, value, text, type) {
+  const label = document.createElement('label');
+  label.className = 'worker-choice';
+  const input = document.createElement('input');
+  input.type = type;
+  input.name = name;
+  input.value = value;
+  input.id = `${name}-${value}`;
+  const caption = document.createElement('span');
+  caption.textContent = text;
+  label.append(input, caption);
+  container.append(label);
+}
+
+document.querySelectorAll('#survey-question-2 .survey-choice-list li').forEach((item, index) => {
+  appendWorkerChoice(document.querySelector('#worker-hazard-types'), 'workerHazardTypes', String(index + 1), item.textContent, 'checkbox');
+});
+document.querySelectorAll('.survey-reason-list li').forEach((item, index) => {
+  appendWorkerChoice(document.querySelector('#worker-safe-reasons'), 'workerSafeReason', String(index + 1), item.textContent, 'radio');
+});
+['before', 'after'].forEach((phase) => {
+  ['likelihood', 'severity'].forEach((dimension) => {
+    const container = document.getElementById(`worker-${phase}-${dimension}`);
+    [...document.getElementById(`${phase}-${dimension}`).options].filter((option) => option.value).forEach((option) => {
+      appendWorkerChoice(container, `worker-${phase}-${dimension}`, option.value, option.textContent, 'radio');
+    });
+    container.addEventListener('change', () => {
+      const likelihood = document.querySelector(`input[name="worker-${phase}-likelihood"]:checked`)?.value;
+      const severity = document.querySelector(`input[name="worker-${phase}-severity"]:checked`)?.value;
+      document.getElementById(`worker-${phase}-risk-score`).value = likelihood && severity
+        ? `발생 가능성 ${likelihood} × 중대성 ${severity} = 위험성 ${Number(likelihood) * Number(severity)}`
+        : '발생 가능성과 중대성을 모두 선택해주세요.';
+    });
+  });
+});
+document.querySelectorAll('input[name="workerHasHazard"]').forEach((input) => {
+  input.addEventListener('change', () => {
+    document.querySelector('#worker-hazard-details').hidden = input.value !== 'yes';
+    document.querySelector('#worker-safe-reasons-field').hidden = input.value !== 'no';
+  });
+});
+document.querySelector('#worker-survey-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  document.querySelector('#worker-submit-message').hidden = false;
+});
+if (window.location.hash === '#risk-survey-preview') showAppView('risk-survey-preview');
