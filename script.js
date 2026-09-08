@@ -2772,7 +2772,7 @@ document.querySelectorAll('[data-coming-soon]').forEach((link) => {
   link.addEventListener('click', (event) => {
     event.preventDefault();
     const toast = document.querySelector('#toast');
-    toast.textContent = `${link.textContent} 메뉴는 추후 개발 예정입니다.`;
+    toast.textContent = link.dataset.comingSoon || `${link.textContent} 메뉴는 추후 개발 예정입니다.`;
     toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
@@ -2780,6 +2780,7 @@ document.querySelectorAll('[data-coming-soon]').forEach((link) => {
 });
 
 const appViews = {
+  home: document.querySelector('#home'),
   maker: document.querySelector('#maker'),
   'process-guide': document.querySelector('#process-guide'),
   'risk-assessment': document.querySelector('#risk-assessment'),
@@ -2789,12 +2790,13 @@ const appViews = {
 
 function showAppView(viewName) {
   if (viewName === 'risk-survey-preview') prepareWorkerSurveyPreview();
-  const nextView = appViews[viewName] || appViews.maker;
+  const nextView = appViews[viewName] || appViews.home;
   Object.values(appViews).forEach((view) => {
     view.hidden = view !== nextView;
   });
   document.querySelectorAll('[data-view-link]').forEach((link) => {
-    const isActive = link.dataset.viewLink === viewName && link.closest('.main-nav');
+    const navView = viewName.startsWith('risk-survey-') ? 'risk-assessment' : viewName;
+    const isActive = link.dataset.viewLink === navView && link.closest('.main-nav');
     link.classList.toggle('active', Boolean(isActive));
     if (isActive) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
@@ -2814,9 +2816,28 @@ document.querySelectorAll('[data-view-link]').forEach((link) => {
 });
 
 window.addEventListener('popstate', () => {
-  showAppView(window.location.hash.slice(1) || 'maker');
+  showAppView(window.location.hash.slice(1) || 'home');
+  if (['#home-tools', '#home-about'].includes(window.location.hash)) scrollToHomeSection(window.location.hash.slice(1));
 });
 
+function scrollToHomeSection(id) {
+  const section = document.getElementById(id);
+  section.focus({ preventScroll: true });
+  section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+}
+
+document.querySelectorAll('[data-home-tools], [data-home-section]').forEach((link) => {
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    const id = link.dataset.homeSection || 'home-tools';
+    if (window.location.hash !== `#${id}`) history.pushState({ viewName: 'home' }, '', `#${id}`);
+    showAppView('home');
+    scrollToHomeSection(id);
+  });
+});
+
+if (window.location.hash === '#maker') showAppView('maker');
+if (['#home-tools', '#home-about'].includes(window.location.hash)) scrollToHomeSection(window.location.hash.slice(1));
 if (window.location.hash === '#process-guide') showAppView('process-guide');
 if (window.location.hash === '#risk-assessment') showAppView('risk-assessment');
 if (window.location.hash === '#risk-survey-create') showAppView('risk-survey-create');

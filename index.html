@@ -3,29 +3,64 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="안전·보건관리자를 위한 MSDS 경고표지 제작 도구">
-  <title>MSDS 경고표지 제작 | HSSO</title>
+  <meta name="description" content="MSDS 경고표지부터 작업공정별 관리요령, 위험성평가까지. 안전보건관리자의 반복적인 실무를 돕는 HSSO입니다.">
+  <title>HSSO | 안전보건 실무 지원 플랫폼</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="assets/home/hero.css">
 </head>
 <body>
   <header class="site-header">
     <div class="header-inner">
-      <a class="logo" href="#maker" aria-label="HSSO 홈" data-view-link="maker">HSSO<span>.</span></a>
+      <a class="logo" href="#home" aria-label="HSSO 홈" data-view-link="home">HSSO<span>.</span></a>
       <button class="menu-button" type="button" aria-expanded="false" aria-controls="main-menu">메뉴</button>
       <nav id="main-menu" class="main-nav" aria-label="주요 메뉴">
-        <a href="#maker" data-view-link="maker">홈</a>
-        <a href="#maker" class="active" aria-current="page" data-view-link="maker">경고표지 제작</a>
-        <a href="#process-guide" data-view-link="process-guide">작업공정별 관리요령</a>
+        <a href="#home-tools" data-home-tools>서비스</a>
         <a href="#risk-assessment" data-view-link="risk-assessment">위험성평가</a>
-        <a href="#" data-coming-soon>MSDS 검색</a>
-        <a href="#" data-coming-soon>안전보건 도구</a>
-        <a href="#" data-coming-soon>자료실</a>
-        <a href="#" data-coming-soon>커뮤니티</a>
+        <a href="#home-about" data-home-section="home-about">HSSO 소개</a>
       </nav>
+      <div class="header-account"><button class="login-button" type="button" data-coming-soon="로그인 기능은 준비 중입니다.">로그인</button></div>
     </div>
   </header>
 
-  <main id="maker">
+  <main id="home" class="home-view" aria-labelledby="home-title">
+    <section class="home-hero" aria-labelledby="home-title">
+      <div class="home-hero-media" aria-hidden="true"><div class="home-hero-photo"></div></div>
+      <div class="home-hero-content section-shell">
+        <p class="home-eyebrow">FOR A SAFER WORKPLACE</p>
+        <h1 id="home-title">안전한 현장을 <span class="home-phrase">만드는 일,</span><br>더 나은 방식으로.</h1>
+        <p class="home-intro">안전보건 실무의 새로운 기준을 만들어갑니다.</p>
+        <a class="home-hero-link" href="#home-tools" data-home-tools>서비스 둘러보기 <span aria-hidden="true">↓</span></a>
+      </div>
+      <div class="home-hero-bottom section-shell" aria-hidden="true"><span>HSSO · SAFETY &amp; HEALTH</span><span class="home-scroll-line"></span><span>SCROLL TO EXPLORE</span></div>
+    </section>
+
+    <section id="home-tools" class="home-tools section-shell" aria-labelledby="home-tools-title" tabindex="-1">
+      <header class="home-section-heading"><p class="home-eyebrow">HSSO SERVICES</p><h2 id="home-tools-title">현장에서 필요한 <span class="home-phrase">안전보건 업무를</span><br>더 체계적으로.</h2></header>
+      <div class="home-service-list">
+        <a class="home-service" href="#maker" data-view-link="maker" aria-labelledby="home-service-1">
+          <span class="home-service-number">01</span><h3 id="home-service-1">경고표지</h3><p>MSDS를 기반으로 필요한 정보를 확인하고<br class="home-desktop-break"> 경고표지를 제작합니다.</p><span class="home-service-arrow" aria-hidden="true">↗</span>
+        </a>
+        <a class="home-service" href="#process-guide" data-view-link="process-guide" aria-labelledby="home-service-2">
+          <span class="home-service-number">02</span><h3 id="home-service-2">작업공정별 관리요령</h3><p>화학물질의 안전한 취급을 위해<br class="home-desktop-break"> MSDS 정보를 관리요령으로 정리합니다.</p><span class="home-service-arrow" aria-hidden="true">↗</span>
+        </a>
+        <a class="home-service" href="#risk-assessment" data-view-link="risk-assessment" aria-labelledby="home-service-3">
+          <span class="home-service-number">03</span><h3 id="home-service-3">위험성평가</h3><p>근로자의 위험요인 의견과<br class="home-desktop-break"> 개선 전·후 위험성을 체계적으로 수집합니다.</p><span class="home-service-arrow" aria-hidden="true">↗</span>
+        </a>
+      </div>
+      <div class="home-upcoming" aria-labelledby="home-upcoming-title"><h3 id="home-upcoming-title">COMING NEXT <span>서비스 준비 중</span></h3><ul><li>MSDS 관리대장</li><li>TBM</li></ul></div>
+    </section>
+
+    <section id="home-about" class="home-about" aria-labelledby="home-about-title" tabindex="-1">
+      <div class="section-shell home-about-grid">
+        <div class="home-about-heading"><p class="home-eyebrow">ABOUT HSSO</p><h2 id="home-about-title">반복을 줄이고,<br>현장에 더 가까이.</h2></div>
+        <div class="home-about-copy"><p>안전보건 업무는 현장과 문서 사이에서<br class="home-desktop-break"> 수많은 반복을 요구합니다.</p><p>HSSO는 그 반복을 줄이고,<br class="home-desktop-break"> 더 중요한 안전보건 업무에 집중할 수 있는<br class="home-desktop-break"> 환경을 만들어갑니다.</p><span class="home-about-signature">HSSO</span></div>
+      </div>
+    </section>
+
+    <section class="home-bottom-cta section-shell" aria-labelledby="home-cta-title"><div><p class="home-eyebrow">YOUR NEXT STEP</p><h2 id="home-cta-title">더 나은 실무의 시작, HSSO.</h2></div><a class="home-text-link" href="#home-tools" data-home-tools>서비스 둘러보기 <span aria-hidden="true">→</span></a></section>
+  </main>
+
+  <main id="maker" hidden>
     <section class="hero section-shell">
       <p class="eyebrow">WARNING LABEL MAKER</p>
       <h1>MSDS 경고표지 제작</h1>
@@ -221,7 +256,7 @@
 
   <main id="process-guide" class="process-guide-view" hidden>
     <section class="process-guide-hero section-shell">
-      <button class="back-button" type="button" data-view-link="maker" aria-label="메인 화면으로 돌아가기">
+      <button class="back-button" type="button" data-view-link="home" aria-label="메인 화면으로 돌아가기">
         <span aria-hidden="true">←</span> 메인 화면으로
       </button>
       <p class="eyebrow">PROCESS SAFETY GUIDE</p>
@@ -350,7 +385,7 @@
 
   <main id="risk-assessment" class="risk-hub section-shell" aria-labelledby="risk-hub-title" hidden>
     <header class="risk-hub-heading">
-      <a class="back-button" href="#maker" data-view-link="maker"><span aria-hidden="true">←</span> 홈으로 돌아가기</a>
+      <a class="back-button" href="#home" data-view-link="home"><span aria-hidden="true">←</span> 홈으로 돌아가기</a>
       <p class="eyebrow">RISK ASSESSMENT</p>
       <h1 id="risk-hub-title">위험성평가</h1>
       <p class="hero-description">현장의 유해·위험요인을 파악하고<br>근로자와 함께 체계적으로 관리하세요.</p>
@@ -518,7 +553,7 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <footer><div class="section-shell"><strong>HSSO</strong><span>안전한 현장을 위한 실용적인 업무 도구</span><small>© 2026 HSSO. MVP Preview.</small></div></footer>
+  <footer class="site-footer"><div class="section-shell"><div class="footer-brand"><a href="#home" data-view-link="home" aria-label="HSSO 홈">HSSO<span>.</span></a><p>안전보건 실무 지원 플랫폼</p></div><small>© HSSO. All rights reserved.</small></div></footer>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script type="module" src="script.js"></script>

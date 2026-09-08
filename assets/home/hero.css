@@ -1,0 +1,11 @@
+/* Hero media configuration. No remote image or unlicensed photograph is used.
+   To use an approved photograph, place hero.webp in this directory and set:
+   --home-hero-image: url("./hero.webp");
+   Keep the subject on the right, leaving space for the headline on the left.
+   Adjust the two positions below after checking 1440px and 390px viewports.
+   The background and contrast overlays in style.css remain when no photo loads. */
+.home-hero {
+  --home-hero-image: none;
+  --home-hero-position: center center;
+  --home-hero-mobile-position: 65% center;
+}
