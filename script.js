@@ -2762,9 +2762,81 @@ processAnalyzeButton.addEventListener('click', async () => {
 
 const menuButton = document.querySelector('.menu-button');
 const mainMenu = document.querySelector('#main-menu');
+const msdsDropdown = document.querySelector('.nav-dropdown');
+const msdsMenuButton = document.querySelector('#msds-menu-button');
+const msdsMenu = document.querySelector('#msds-menu');
+const desktopNavigation = window.matchMedia('(min-width: 901px)');
+let msdsCloseTimer;
+let msdsOpenBeforeTouch = false;
+
+function setMsdsMenuOpen(isOpen) {
+  clearTimeout(msdsCloseTimer);
+  msdsMenuButton.setAttribute('aria-expanded', String(isOpen));
+  msdsMenu.hidden = !isOpen;
+}
+
+msdsDropdown.addEventListener('pointerenter', (event) => {
+  if (desktopNavigation.matches && event.pointerType === 'mouse') setMsdsMenuOpen(true);
+});
+msdsDropdown.addEventListener('pointerleave', (event) => {
+  if (desktopNavigation.matches && event.pointerType === 'mouse') {
+    msdsCloseTimer = setTimeout(() => {
+      if (!msdsDropdown.contains(document.activeElement)) setMsdsMenuOpen(false);
+    }, 180);
+  }
+});
+msdsDropdown.addEventListener('focusin', () => {
+  if (desktopNavigation.matches) setMsdsMenuOpen(true);
+});
+msdsDropdown.addEventListener('focusout', (event) => {
+  if (!msdsDropdown.contains(event.relatedTarget)) setMsdsMenuOpen(false);
+});
+msdsMenuButton.addEventListener('pointerdown', (event) => {
+  if (event.pointerType === 'touch') msdsOpenBeforeTouch = !msdsMenu.hidden;
+});
+msdsMenuButton.addEventListener('click', (event) => {
+  // Desktop focus/hover already opens the menu; touch remains a disclosure toggle.
+  if (event.pointerType === 'touch') setMsdsMenuOpen(!msdsOpenBeforeTouch);
+  else if (desktopNavigation.matches) setMsdsMenuOpen(true);
+  else setMsdsMenuOpen(msdsMenu.hidden);
+});
+msdsMenuButton.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    setMsdsMenuOpen(true);
+    msdsMenu.querySelector('a').focus();
+  }
+});
+document.querySelector('.site-header').addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  if (!msdsMenu.hidden) {
+    msdsMenuButton.focus();
+    setMsdsMenuOpen(false);
+  } else if (mainMenu.classList.contains('open')) {
+    mainMenu.classList.remove('open');
+    menuButton.setAttribute('aria-expanded', 'false');
+    menuButton.focus();
+  }
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!msdsDropdown.contains(event.target)) setMsdsMenuOpen(false);
+});
+msdsMenu.addEventListener('click', (event) => {
+  if (event.target.closest('[data-coming-soon]')) msdsMenuButton.focus();
+  if (event.target.closest('a, button')) setMsdsMenuOpen(false);
+});
+desktopNavigation.addEventListener('change', () => {
+  if (mainMenu.contains(document.activeElement)) {
+    (desktopNavigation.matches ? msdsMenuButton : menuButton).focus();
+  }
+  setMsdsMenuOpen(false);
+  mainMenu.classList.remove('open');
+  menuButton.setAttribute('aria-expanded', 'false');
+});
 menuButton.addEventListener('click', () => {
   const isOpen = mainMenu.classList.toggle('open');
   menuButton.setAttribute('aria-expanded', String(isOpen));
+  if (!isOpen) setMsdsMenuOpen(false);
 });
 
 let toastTimer;
@@ -2804,6 +2876,7 @@ function showAppView(viewName) {
   mainMenu.classList.remove('open');
   menuButton.setAttribute('aria-expanded', 'false');
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  setMsdsMenuOpen(false);
 }
 
 document.querySelectorAll('[data-view-link]').forEach((link) => {

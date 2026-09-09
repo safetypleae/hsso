@@ -464,13 +464,24 @@ fieldset.worker-section { padding-top: 18px; margin-top: 18px; }
 }
 
 /* Brand homepage. Scale and layout are scoped to home; shared chrome is explicit. */
-.header-inner { min-height: 88px; gap: 48px; }
-.site-header .logo { display: inline-flex; align-items: center; min-height: 44px; font-size: 29px; letter-spacing: -1px; }
-.main-nav { margin-left: auto; gap: 42px; }
-.main-nav a { display: inline-flex; align-items: center; min-height: 48px; font-size: 16px; font-weight: 600; }
-.main-nav a.active::after { bottom: -20px; height: 2px; }
+.header-inner { min-height: 96px; gap: 48px; }
+.site-header .logo { display: inline-flex; align-items: center; min-height: 48px; font-size: 32px; letter-spacing: -1px; }
+.main-nav { margin-left: auto; gap: 44px; }
+.main-nav a, .nav-dropdown-trigger { display: inline-flex; align-items: center; min-width: 44px; min-height: 48px; font-size: 18px; font-weight: 600; }
+.main-nav > a.active::after { bottom: -24px; height: 2px; }
 .header-account { margin-left: 0; padding-left: 32px; border-left: 1px solid var(--line); }
-.login-button { min-width: 44px; min-height: 44px; border: 0; padding: 8px 0; color: var(--navy); background: transparent; font-size: 15px; font-weight: 600; }
+.login-button { min-width: 48px; min-height: 48px; border: 0; padding: 8px 0; color: var(--navy); background: transparent; font-size: 17px; font-weight: 600; }
+.nav-dropdown { position: relative; display: flex; align-items: center; align-self: stretch; }
+.nav-dropdown-trigger { gap: 10px; padding: 0; border: 0; color: #536274; background: transparent; }
+.nav-dropdown-trigger:hover, .nav-dropdown-trigger[aria-expanded="true"] { color: var(--blue); }
+.nav-chevron { width: 7px; height: 7px; margin-top: -4px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
+.nav-dropdown-trigger[aria-expanded="true"] .nav-chevron { margin-top: 4px; transform: rotate(225deg); }
+.nav-submenu { position: absolute; top: 100%; left: -24px; width: 276px; padding: 12px; border: 1px solid var(--line); border-top: 2px solid var(--blue); background: #fff; box-shadow: 0 8px 16px rgba(17,37,61,.05); }
+.main-nav .nav-submenu a, .nav-submenu button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 50px; padding: 12px; border: 0; color: #536274; background: transparent; text-align: left; font-size: 16px; font-weight: 500; line-height: 1.6; }
+.main-nav .nav-submenu a:hover, .main-nav .nav-submenu a.active, .nav-submenu button:hover { color: var(--blue-dark); background: #f2f7f8; }
+.main-nav .nav-submenu a.active::after { display: none; }
+.nav-menu-note { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.site-header button:focus-visible, .main-nav .nav-submenu a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .login-button:hover { color: var(--blue); }
 .home-view {
   --home-display: clamp(48px, 4.45vw, 64px);
@@ -517,7 +528,7 @@ fieldset.worker-section { padding-top: 18px; margin-top: 18px; }
 .home-upcoming h3 span { letter-spacing: 0; color: var(--muted); font-weight: 400; }
 .home-upcoming ul { display: flex; gap: 32px; list-style: none; padding: 0; margin: 0; color: #5c6b76; font-size: 16px; }
 .home-upcoming li + li { border-left: 1px solid var(--line); padding-left: 32px; }
-.home-about { padding-block: var(--home-space); background: #eff3f3; scroll-margin-top: 88px; }
+.home-about { padding-block: var(--home-space); background: #eff3f3; scroll-margin-top: 96px; }
 .home-about-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 100px; }
 .home-about-copy { padding-top: 50px; }
 .home-about-copy p { margin: 0 0 28px; font-size: var(--home-body); line-height: 2; color: #50616d; }
@@ -550,13 +561,18 @@ fieldset.worker-section { padding-top: 18px; margin-top: 18px; }
   .main-nav { order: 4; margin: 0; padding: 8px 0; gap: 4px; }
   .main-nav a { width: 100%; padding: 10px 4px; min-height: 48px; }
   .main-nav a.active { background: var(--blue-soft); }
+  .main-nav.open { max-height: calc(100dvh - 88px); overflow-y: auto; overscroll-behavior: contain; }
+  .nav-dropdown { display: block; width: 100%; }
+  .nav-dropdown-trigger { width: 100%; justify-content: space-between; min-height: 48px; padding: 10px 4px; }
+  .nav-submenu { position: static; width: 100%; margin-block: 4px 8px; padding: 4px 8px; border: 0; border-left: 2px solid var(--line); box-shadow: none; }
+  .main-nav .nav-submenu a, .nav-submenu button { min-height: 48px; padding: 10px 12px; }
   .home-hero { height: 680px; min-height: 620px; }
 }
 @media (max-width: 680px) {
   .home-view { --home-display: 36px; --home-heading: 30px; --home-service-title: 25px; --home-body: 17px; --home-caption: 12px; --home-space: 76px; }
   .home-view .section-shell, .site-footer .section-shell { width: calc(100% - 48px); }
   .header-inner { width: calc(100% - 40px); min-height: 72px; gap: 12px; padding-block: 10px; }
-  .site-header .logo { font-size: 26px; }
+  .site-header .logo { font-size: 28px; }
   .header-account { padding-left: 16px; }
   .home-hero { min-height: 580px; height: calc(90svh - 72px); max-height: 760px; }
   .home-hero-content { padding-block: 56px 106px; }
