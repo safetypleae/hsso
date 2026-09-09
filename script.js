@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.mjs';
+import { initAuthUI } from './auth.js';
 
 // PDF.js 본체와 워커는 반드시 같은 버전을 사용한다.
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.worker.mjs';
@@ -2853,12 +2854,19 @@ document.querySelectorAll('[data-coming-soon]').forEach((link) => {
 
 const appViews = {
   home: document.querySelector('#home'),
+  login: document.querySelector('#login'),
+  signup: document.querySelector('#signup'),
   maker: document.querySelector('#maker'),
   'process-guide': document.querySelector('#process-guide'),
   'risk-assessment': document.querySelector('#risk-assessment'),
   'risk-survey-create': document.querySelector('#risk-survey-create'),
   'risk-survey-preview': document.querySelector('#risk-survey-preview')
 };
+
+const updateAuthView = initAuthUI((viewName) => {
+  if (window.location.hash !== `#${viewName}`) history.pushState({ viewName }, '', `#${viewName}`);
+  showAppView(viewName);
+});
 
 function showAppView(viewName) {
   if (viewName === 'risk-survey-preview') prepareWorkerSurveyPreview();
@@ -2877,6 +2885,7 @@ function showAppView(viewName) {
   menuButton.setAttribute('aria-expanded', 'false');
   window.scrollTo({ top: 0, behavior: 'smooth' });
   setMsdsMenuOpen(false);
+  updateAuthView(nextView.id);
 }
 
 document.querySelectorAll('[data-view-link]').forEach((link) => {
@@ -2914,6 +2923,7 @@ if (['#home-tools', '#home-about'].includes(window.location.hash)) scrollToHomeS
 if (window.location.hash === '#process-guide') showAppView('process-guide');
 if (window.location.hash === '#risk-assessment') showAppView('risk-assessment');
 if (window.location.hash === '#risk-survey-create') showAppView('risk-survey-create');
+if (['#login', '#signup'].includes(window.location.hash)) showAppView(window.location.hash.slice(1));
 
 document.querySelector('#risk-survey-form').addEventListener('submit', (event) => event.preventDefault());
 

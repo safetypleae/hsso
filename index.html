@@ -25,7 +25,7 @@
         </div>
         <a href="#risk-assessment" data-view-link="risk-assessment">위험성평가</a>
       </nav>
-      <div class="header-account"><button class="login-button" type="button" data-coming-soon="로그인 기능은 준비 중입니다.">로그인</button></div>
+      <div class="header-account"><button class="login-button" type="button" data-view-link="login">로그인</button></div>
     </div>
   </header>
 
@@ -557,6 +557,51 @@
       <button class="primary-button" id="worker-submit-button" type="submit">제출하기</button>
       <p id="worker-submit-message" class="worker-submit-message" role="status" hidden>현재는 미리보기 화면입니다. 실제 제출 기능은 다음 단계에서 연결됩니다.</p>
     </form>
+  </main>
+
+  <main id="login" class="auth-view" aria-labelledby="login-title" hidden>
+    <div class="auth-layout">
+      <div class="auth-brand-area">
+        <a class="auth-brand" href="#home" data-view-link="home" aria-label="HSSO 홈">HSSO<span>.</span></a>
+        <p>안전보건 실무를<br> 더 편리하게 관리하세요.</p>
+      </div>
+      <div class="auth-content">
+        <h1 id="login-title" tabindex="-1">로그인</h1>
+        <p class="auth-intro">HSSO에 오신 것을 환영합니다.</p>
+        <p id="login-message" class="auth-message" role="status" tabindex="-1" hidden></p>
+        <form id="login-form" class="auth-form" method="post" novalidate>
+          <div class="auth-field"><label for="login-email">이메일</label><input id="login-email" name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+          <div class="auth-field"><label for="login-password">비밀번호</label><input id="login-password" name="password" type="password" autocomplete="current-password" required></div>
+          <button id="login-submit" class="auth-submit" type="submit" disabled>로그인</button>
+        </form>
+        <p class="auth-switch">아직 회원이 아니신가요? <a href="#signup" data-view-link="signup">회원가입</a></p>
+      </div>
+    </div>
+  </main>
+
+  <main id="signup" class="auth-view" aria-labelledby="signup-title" hidden>
+    <div class="auth-layout">
+      <div class="auth-brand-area">
+        <a class="auth-brand" href="#home" data-view-link="home" aria-label="HSSO 홈">HSSO<span>.</span></a>
+        <p>안전보건 실무를<br> 더 편리하게 관리하세요.</p>
+      </div>
+      <div class="auth-content">
+        <h1 id="signup-title" tabindex="-1">회원가입</h1>
+        <p class="auth-intro">회원정보를 입력해주세요. 모든 항목은 필수입니다.</p>
+        <form id="signup-form" class="auth-form" method="post" action="/api/auth/signup" novalidate>
+          <div class="auth-field"><label for="signup-name">이름</label><input id="signup-name" name="name" type="text" autocomplete="name" required aria-describedby="signup-name-error"><span id="signup-name-error" class="auth-field-error" hidden></span></div>
+          <div class="auth-field"><label for="signup-company">회사명</label><input id="signup-company" name="companyName" type="text" autocomplete="organization" required aria-describedby="signup-company-error"><span id="signup-company-error" class="auth-field-error" hidden></span></div>
+          <div class="auth-field"><label for="signup-department">부서명</label><input id="signup-department" name="departmentName" type="text" required aria-describedby="signup-department-error"><span id="signup-department-error" class="auth-field-error" hidden></span></div>
+          <div class="auth-field"><label for="signup-position">직급</label><input id="signup-position" name="position" type="text" autocomplete="organization-title" required aria-describedby="signup-position-error"><span id="signup-position-error" class="auth-field-error" hidden></span></div>
+          <div class="auth-field"><label for="signup-email">이메일</label><input id="signup-email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" required aria-describedby="signup-email-error"><span id="signup-email-error" class="auth-field-error" hidden></span></div>
+          <div class="auth-field"><label for="signup-password">비밀번호</label><input id="signup-password" name="password" type="password" autocomplete="new-password" required aria-describedby="signup-password-help signup-password-error"><span id="signup-password-help" class="auth-field-help">8~128자로 입력해주세요.</span><span id="signup-password-error" class="auth-field-error" hidden></span></div>
+          <div class="auth-field"><label for="signup-password-confirm">비밀번호 확인</label><input id="signup-password-confirm" name="passwordConfirm" type="password" autocomplete="new-password" required aria-describedby="signup-password-confirm-error"><span id="signup-password-confirm-error" class="auth-field-error" hidden></span></div>
+          <p id="signup-message" class="auth-message" role="alert" tabindex="-1" hidden></p>
+          <button id="signup-submit" class="auth-submit" type="submit" disabled>회원가입</button>
+        </form>
+        <p class="auth-switch">이미 회원이신가요? <a href="#login" data-view-link="login">로그인</a></p>
+      </div>
+    </div>
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
