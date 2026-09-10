@@ -1,15 +1,16 @@
 const TYPES = { warning_label: '경고표지', process_guide: '작업공정별 관리요령' };
-const PPE = { '301':'보안경 착용','302':'방독마스크 착용','303':'방진마스크 착용','304':'보안면 착용','305':'안전모 착용','306':'귀마개 착용','307':'안전화 착용','308':'안전장갑 착용','309':'안전복 착용' };
 const $ = selector => document.querySelector(selector);
 const el = (tag, text, className = '') => Object.assign(document.createElement(tag), { textContent: text, className });
 const date = value => new Date(value).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
 
-export function initMyPage(navigate, readWarning, readProcess) {
+export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
   const root = $('#mypage'); const content = $('#my-content'); const status = $('#my-status');
   let generation = 0; let current = 'dashboard'; let user; let offset = 0;
   let filters = { type: '', period: '90', q: '' };
   let pendingDelete; let opener;
   const dialog = $('#my-delete-dialog');
+  let disposePreview = () => {};
+  function clearContent() { disposePreview(); disposePreview = () => {}; content.replaceChildren(); }
   function loginRequired(message) {
     navigate('login');
     const target = $('#login-message'); target.textContent = message; target.hidden = false; target.focus();
@@ -45,13 +46,13 @@ export function initMyPage(navigate, readWarning, readProcess) {
   }
   function fail(error, version) {
     if (version !== generation || root.hidden) return;
-    content.replaceChildren();
+    clearContent();
     if (error.status === 401) { loginRequired('마이페이지를 이용하려면 로그인이 필요합니다.'); return; }
     status.textContent = '문서를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
     content.append(button('다시 시도',()=>load()));
   }
   async function load() {
-    const version = ++generation; content.replaceChildren(); status.textContent = '불러오는 중입니다.';
+    const version = ++generation; clearContent(); status.textContent = '불러오는 중입니다.';
     $('#my-nav').hidden = true;
     try {
       const session = await api('/api/auth/me');
@@ -98,25 +99,14 @@ export function initMyPage(navigate, readWarning, readProcess) {
     } catch(error) { fail(error,version); }
   }
   async function detail(id) {
-    const version=++generation; content.replaceChildren();status.textContent='문서를 불러오는 중입니다.';
+    const version=++generation; clearContent();status.textContent='문서를 불러오는 중입니다.';
     try {
       const {document:doc}=await api('/api/documents/'+encodeURIComponent(id));
       if(version!==generation || root.hidden) return;
-      status.textContent=''; content.append(button('목록으로',()=>load())); heading(doc.title,`${TYPES[doc.documentType]} · 생성일 ${date(doc.createdAt)} · 보관 만료일 ${date(doc.expiresAt)}`);
-      const data=doc.documentData;
-      const section=(title,value)=>{ const block=el('section','','my-detail-section');block.append(el('h2',title),el('p',value || '저장된 내용 없음'));content.append(block); };
-      section('제품명',data.productName);section('신호어',data.signalWord);
-      const ghs=el('section','','my-detail-section');ghs.append(el('h2','GHS'));const images=el('div','','my-ghs');
-      for(const code of (data.ghsCodes || data.ghs || [])) if(/^GHS0[1-9]$/.test(code)) {const figure=el('figure'); const img=document.createElement('img');img.src=`assets/ghs/${code.toLowerCase()}.svg`;img.alt=code;figure.append(img,el('figcaption',code));images.append(figure);} ghs.append(images.childElementCount?images:el('p','선택된 GHS 없음'));content.append(ghs);
-      section('유해·위험문구',data.hazardStatements);
-      if(doc.documentType==='warning_label') {
-        for(const group of data.precautions) section(`예방조치문구 · ${group.category}`,group.statements.join('\n'));
-        if(!data.precautions.length) section('예방조치문구',''); section('공급자',data.supplierName);section('연락처',data.supplierPhone);
-      } else {
-        section('안전취급요령',data.handling.safeHandling);section('최종 선택 보호구',data.ppeNone?'해당 없음':data.selectedPpe.map(code=>PPE[code] || code).join('\n'));
-        for(const [key,label] of Object.entries({eye:'눈',skin:'피부',inhalation:'흡입',ingestion:'섭취'})) section(`응급조치 · ${label}`,data.firstAid[key]);
-        section('사고 대응 · 화재',data.accidentResponse.fire);section('사고 대응 · 누출',data.accidentResponse.spill);
-      }
+      status.textContent='';
+      content.append(button('← 내 문서로 돌아가기',()=>{current='documents';load();}));
+      heading(doc.title,`${TYPES[doc.documentType]} · 저장일 ${date(doc.createdAt)} · 보관 만료일 ${date(doc.expiresAt)}`);
+      disposePreview = mountPreview(content, doc);
     } catch(error) { fail(error,version); }
   }
   $('#my-delete-cancel').addEventListener('click',()=>dialog.close());
@@ -143,8 +133,8 @@ export function initMyPage(navigate, readWarning, readProcess) {
       finally{trigger.disabled=false;}
     });
   }
-  document.addEventListener('visibilitychange',()=>{if(!root.hidden){if(document.hidden){++generation;content.replaceChildren();$('#my-nav').hidden=true;status.textContent='로그인 상태를 확인하고 있습니다.';}else load();}});
-  window.addEventListener('pagehide',()=>{++generation;content.replaceChildren();$('#my-nav').hidden=true;});
+  document.addEventListener('visibilitychange',()=>{if(!root.hidden){if(document.hidden){++generation;clearContent();$('#my-nav').hidden=true;status.textContent='로그인 상태를 확인하고 있습니다.';}else load();}});
+  window.addEventListener('pagehide',()=>{++generation;clearContent();$('#my-nav').hidden=true;});
   window.addEventListener('pageshow',event=>{if(event.persisted&&!root.hidden)load();});
-  return view=>{++generation;content.replaceChildren();$('#my-nav').hidden=true;status.textContent='';if(dialog.open)dialog.close();if(view==='mypage'){current='dashboard';offset=0;load();}};
+  return view=>{++generation;clearContent();$('#my-nav').hidden=true;status.textContent='';if(dialog.open)dialog.close();if(view==='mypage'){current='dashboard';offset=0;load();}};
 }

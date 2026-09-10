@@ -28,11 +28,17 @@
 .my-profile { display: grid; grid-template-columns: 140px minmax(0,1fr); margin-top: 32px; }
 .my-profile dt, .my-profile dd { padding: 18px 0; margin: 0; border-bottom: 1px solid #dce3e7; overflow-wrap: anywhere; }
 .my-profile dt { color: var(--muted); }
-.my-detail-section { padding: 18px 0; border-bottom: 1px solid #dce3e7; }
-.my-detail-section p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
-.my-ghs { display: flex; flex-wrap: wrap; gap: 16px; }
-.my-ghs figure { margin: 0; text-align: center; }
-.my-ghs img { width: 64px; height: 64px; }
+.saved-preview-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-block: 24px 16px; }
+.saved-preview-controls label { display: grid; gap: 8px; min-width: 0; font-size: 14px; }
+.saved-preview-controls select, .saved-preview-controls input { max-width: 100%; min-width: 0; min-height: 44px; padding: 10px; border: 1px solid #cbd5dc; border-radius: 3px; background: white; font: inherit; }
+.saved-preview-controls > label { flex: 1 1 240px; }
+.saved-preview-controls > p { flex-basis: 100%; margin: 0; }
+.saved-custom-size { display: flex; flex-wrap: wrap; gap: 12px; min-width: 0; }
+.saved-custom-size label { flex: 1 1 100px; }
+.saved-custom-size input { width: 120px; }
+.saved-document-preview { width: 100%; min-width: 0; overflow: hidden; padding: 12px; margin-bottom: 20px; background: #eef2f4; border: 1px solid #d9e0e3; }
+.saved-preview-stage { position: relative; margin-inline: auto; max-width: 100%; }
+.saved-preview-stage > .print-sheet, .saved-preview-stage > .process-poster { position: absolute; top: 0; left: 0; max-width: none; transform-origin: top left; }
 .my-dialog { width: min(460px,calc(100% - 32px)); max-height: 85vh; padding: 28px; border: 1px solid #dce3e7; border-radius: 4px; color: var(--navy); overflow-wrap: anywhere; }
 .my-dialog::backdrop { background: #142e3b66; }
 .my-dialog h2 { font-size: 21px; }

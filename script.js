@@ -1,6 +1,7 @@
 import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.mjs';
 import { initAuthUI } from './auth.js';
 import { initMyPage } from './mypage.js';
+import { createSavedDocumentPreview } from './saved-document-preview.js';
 
 // PDF.js 본체와 워커는 반드시 같은 버전을 사용한다.
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.worker.mjs';
@@ -2076,8 +2077,10 @@ async function createPdfRenderSheet(data, layout) {
   return { sheet, logicalWidth, logicalHeight, fit, geometry };
 }
 
-async function downloadWarningLabelPdf() {
-  const size = getSelectedLabelSize();
+async function downloadWarningLabelPdf(saved = null) {
+  const size = saved?.layout || getSelectedLabelSize();
+  const pdfDownloadMessage = saved?.message || document.querySelector('#pdf-download-message');
+  const downloadPdfButton = saved?.button || document.querySelector('#download-pdf');
   pdfDownloadMessage.hidden = true;
   pdfDownloadMessage.className = 'pdf-download-message';
   if (!size) {
@@ -2096,9 +2099,9 @@ async function downloadWarningLabelPdf() {
   downloadPdfButton.textContent = 'PDF 생성 중...';
   let renderSheet;
   try {
-    const previewData = previewWarningLabelData || getFinalWarningLabelData();
+    const previewData = saved?.data || previewWarningLabelData || getFinalWarningLabelData();
     const pdfData = structuredClone(previewData);
-    assertSameWarningData(previewData, getFinalWarningLabelData());
+    assertSameWarningData(previewData, saved?.data || getFinalWarningLabelData());
     assertSameWarningData(previewData, pdfData);
     renderSheet = await createPdfRenderSheet(pdfData, size);
     if (!renderSheet.fit.fits) throw new Error('이 출력 크기에는 내용이 너무 많습니다. 더 큰 출력 크기를 선택해주세요.');
@@ -2143,7 +2146,7 @@ async function downloadWarningLabelPdf() {
       throw new Error('선택한 출력 크기로 PDF 페이지를 만들지 못했습니다. 크기 값을 확인해 주세요.');
     }
     pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, size.pageWidth, size.pageHeight, undefined, 'FAST');
-    const productName = document.querySelector('#product-name').value;
+    const productName = saved?.data?.productName ?? document.querySelector('#product-name').value;
     pdf.save(safePdfFilename(productName));
     pdfDownloadMessage.textContent = `${size.pageWidth} × ${size.pageHeight} mm · 경고표지 ${size.count}개 PDF를 생성했습니다.`;
     pdfDownloadMessage.hidden = false;
@@ -2155,11 +2158,11 @@ async function downloadWarningLabelPdf() {
   } finally {
     renderSheet?.sheet.remove();
     downloadPdfButton.disabled = false;
-    downloadPdfButton.textContent = 'PDF 다운로드';
+    downloadPdfButton.textContent = saved?.data ? 'PDF 저장' : 'PDF 다운로드';
   }
 }
 
-downloadPdfButton.addEventListener('click', downloadWarningLabelPdf);
+downloadPdfButton.addEventListener('click', () => downloadWarningLabelPdf());
 
 rawTextToggle.addEventListener('click', () => {
   const willOpen = rawTextPanel.hidden;
@@ -2371,14 +2374,14 @@ function processAccidentPreviewItems(value, limit = 4) {
   return items.slice(0, limit);
 }
 
-function renderProcessItemList(selector, value, limit) {
-  const list = document.querySelector(selector);
+function renderProcessItemList(selector, value, limit, root = document) {
+  const list = root.querySelector(selector);
   const items = processPreviewItems(value, limit);
   list.replaceChildren(...items.map((text) => Object.assign(document.createElement('li'), { textContent: text })));
 }
 
-function renderProcessAccidentList(selector, value) {
-  const list = document.querySelector(selector);
+function renderProcessAccidentList(selector, value, root = document) {
+  const list = root.querySelector(selector);
   const items = processAccidentPreviewItems(value);
   list.replaceChildren(...items.map((text) => Object.assign(document.createElement('li'), { textContent: text })));
 }
@@ -2396,11 +2399,11 @@ function scaleProcessPreview() {
   stage.style.height = `${poster.offsetHeight * scale}px`;
 }
 
-function renderProcessGuideData(data) {
-  const productName = document.querySelector('#process-product-name');
+function renderProcessGuideData(data, root = document) {
+  const productName = root.querySelector('#process-product-name');
   productName.textContent = String(data.productName || '').trim();
   productName.classList.toggle('long', productName.textContent.length > 24);
-  const ghsArea = document.querySelector('#process-ghs');
+  const ghsArea = root.querySelector('#process-ghs');
   const pictograms = data.ghs.map((code) => GHS_PICTOGRAMS.find((item) => item.code === code)).filter(Boolean);
   ghsArea.replaceChildren(...pictograms.map((pictogram) => {
     const item = document.createElement('div');
@@ -2411,10 +2414,10 @@ function renderProcessGuideData(data) {
     );
     return item;
   }));
-  document.querySelector('#process-signal-word').textContent = String(data.signalWord || '').trim();
-  renderProcessItemList('#process-hazards', data.hazardStatements, 5);
-  renderProcessItemList('#process-handling', data.handling.safeHandling, 5);
-  const ppeArea = document.querySelector('#process-ppe');
+  root.querySelector('#process-signal-word').textContent = String(data.signalWord || '').trim();
+  renderProcessItemList('#process-hazards', data.hazardStatements, 5, root);
+  renderProcessItemList('#process-handling', data.handling.safeHandling, 5, root);
+  const ppeArea = root.querySelector('#process-ppe');
   const selectedPpe = new Set(data.selectedPpe || PROCESS_PPE_ICONS.filter((item) => item.present(data.ppe)).map((item) => item.code));
   const ppeItems = PROCESS_PPE_ICONS.filter((item) => selectedPpe.has(item.code)).map((item) => {
     const icon = document.createElement('div');
@@ -2430,14 +2433,16 @@ function renderProcessGuideData(data) {
     className: 'process-ppe-empty', textContent: '해당 없음'
   }) : null;
   ppeArea.replaceChildren(...ppeItems, ...(emptyPpe ? [emptyPpe] : []));
-  renderProcessItemList('#process-first-aid-eye', data.firstAid.eye, 3);
-  renderProcessItemList('#process-first-aid-skin', data.firstAid.skin, 3);
-  renderProcessItemList('#process-first-aid-inhalation', data.firstAid.inhalation, 3);
-  renderProcessItemList('#process-first-aid-ingestion', data.firstAid.ingestion, 3);
-  renderProcessAccidentList('#process-accident-fire', data.accidentResponse.fire);
-  renderProcessAccidentList('#process-accident-spill', data.accidentResponse.spill);
-  document.querySelector('#process-preview').hidden = false;
-  requestAnimationFrame(() => requestAnimationFrame(scaleProcessPreview));
+  renderProcessItemList('#process-first-aid-eye', data.firstAid.eye, 3, root);
+  renderProcessItemList('#process-first-aid-skin', data.firstAid.skin, 3, root);
+  renderProcessItemList('#process-first-aid-inhalation', data.firstAid.inhalation, 3, root);
+  renderProcessItemList('#process-first-aid-ingestion', data.firstAid.ingestion, 3, root);
+  renderProcessAccidentList('#process-accident-fire', data.accidentResponse.fire, root);
+  renderProcessAccidentList('#process-accident-spill', data.accidentResponse.spill, root);
+  if (root === document) {
+    document.querySelector('#process-preview').hidden = false;
+    requestAnimationFrame(() => requestAnimationFrame(scaleProcessPreview));
+  }
 }
 
 window.addEventListener('resize', scaleProcessPreview);
@@ -2628,8 +2633,7 @@ function verifyProcessPdfCanvas(canvas, geometry) {
   return results;
 }
 
-async function createProcessGuidePdfCanvas() {
-  const preview = document.querySelector('#process-preview');
+async function createProcessGuidePdfCanvas(preview = document.querySelector('#process-preview')) {
   const poster = preview.querySelector('.process-poster');
   if (preview.hidden || !poster) throw new Error('먼저 미리보기를 생성해 주세요.');
   const renderPoster = poster.cloneNode(true);
@@ -2660,9 +2664,9 @@ async function createProcessGuidePdfCanvas() {
   }
 }
 
-async function downloadProcessGuidePdf() {
-  const button = document.querySelector('#process-download-pdf');
-  const message = document.querySelector('#process-pdf-message');
+async function downloadProcessGuidePdf(saved = null) {
+  const button = saved?.button || document.querySelector('#process-download-pdf');
+  const message = saved?.message || document.querySelector('#process-pdf-message');
   message.hidden = true;
   message.className = 'process-pdf-message';
   if (!window.html2canvas || !window.jspdf?.jsPDF) {
@@ -2674,7 +2678,7 @@ async function downloadProcessGuidePdf() {
   button.disabled = true;
   button.textContent = 'PDF 생성 중...';
   try {
-    const render = await createProcessGuidePdfCanvas();
+    const render = await createProcessGuidePdfCanvas(saved?.preview);
     const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
@@ -2682,7 +2686,7 @@ async function downloadProcessGuidePdf() {
       throw new Error('A4 세로 1페이지 PDF를 준비하지 못했습니다.');
     }
     pdf.addImage(render.canvas.toDataURL('image/png'), 'PNG', 0, 0, pageWidth, pageHeight, undefined, 'FAST');
-    const filename = safeProcessGuidePdfFilename(window.__hssoProcessGuideEditableData?.productName);
+    const filename = safeProcessGuidePdfFilename(saved?.productName ?? window.__hssoProcessGuideEditableData?.productName);
     window.__hssoLastProcessPdfAudit = {
       filename,
       captureScale: render.scale,
@@ -2700,11 +2704,11 @@ async function downloadProcessGuidePdf() {
     message.hidden = false;
   } finally {
     button.disabled = false;
-    button.textContent = 'PDF 출력';
+    button.textContent = saved?.preview ? 'PDF 저장' : 'PDF 출력';
   }
 }
 
-document.querySelector('#process-download-pdf').addEventListener('click', downloadProcessGuidePdf);
+document.querySelector('#process-download-pdf').addEventListener('click', () => downloadProcessGuidePdf());
 
 const processFileInput = document.querySelector('#process-file-input');
 const processDropZone = document.querySelector('.process-drop-zone');
@@ -2878,7 +2882,12 @@ const updateMyPageView = initMyPage((viewName) => {
     firstAid: { eye: data.firstAid.eye, skin: data.firstAid.skin, inhalation: data.firstAid.inhalation, ingestion: data.firstAid.ingestion },
     accidentResponse: { fire: data.accidentResponse.fire, spill: data.accidentResponse.spill },
     selectedPpe: data.selectedPpe, ppeNone: data.ppeNone });
-});
+}, createSavedDocumentPreview({
+  createPrintSheet, fitOutputLabels, layouts: PRINT_LAYOUTS,
+  processTemplate: document.querySelector('#process-preview .process-poster'),
+  renderProcess: renderProcessGuideData,
+  downloadWarning: downloadWarningLabelPdf, downloadProcess: downloadProcessGuidePdf
+}));
 
 const updateAuthView = initAuthUI((viewName) => {
   if (window.location.hash !== `#${viewName}`) history.pushState({ viewName }, '', `#${viewName}`);
