@@ -483,6 +483,10 @@ fieldset.worker-section { padding-top: 18px; margin-top: 18px; }
 .nav-menu-note { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .site-header button:focus-visible, .main-nav .nav-submenu a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .login-button:hover { color: var(--blue); }
+.header-session { display: flex; align-items: center; gap: 24px; }
+.account-button { min-height: 48px; min-width: 44px; padding: 8px 0; border: 0; background: transparent; color: var(--navy); font-size: 17px; font-weight: 600; white-space: nowrap; }
+.account-button:hover { color: var(--blue); }
+.account-button:disabled { cursor: wait; opacity: .6; }
 .home-view {
   --home-display: clamp(48px, 4.45vw, 64px);
   --home-heading: clamp(34px, 3vw, 44px);
@@ -574,6 +578,8 @@ fieldset.worker-section { padding-top: 18px; margin-top: 18px; }
   .header-inner { width: calc(100% - 40px); min-height: 72px; gap: 12px; padding-block: 10px; }
   .site-header .logo { font-size: 28px; }
   .header-account { padding-left: 16px; }
+  .header-session { gap: 12px; }
+  .account-button { font-size: 14px; }
   .home-hero { min-height: 580px; height: calc(90svh - 72px); max-height: 760px; }
   .home-hero-content { padding-block: 56px 106px; }
   .home-hero .home-eyebrow { margin-bottom: 28px; letter-spacing: 1.5px; }

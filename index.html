@@ -25,7 +25,13 @@
         </div>
         <a href="#risk-assessment" data-view-link="risk-assessment">위험성평가</a>
       </nav>
-      <div class="header-account"><button class="login-button" type="button" data-view-link="login">로그인</button></div>
+      <div class="header-account">
+        <button id="header-login" class="login-button" type="button" data-view-link="login">로그인</button>
+        <div id="header-session" class="header-session" hidden>
+          <button class="account-button" type="button" data-coming-soon="마이페이지는 준비 중입니다.">마이페이지</button>
+          <button id="header-logout" class="account-button" type="button">로그아웃</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -569,7 +575,7 @@
         <h1 id="login-title" tabindex="-1">로그인</h1>
         <p class="auth-intro">HSSO에 오신 것을 환영합니다.</p>
         <p id="login-message" class="auth-message" role="status" tabindex="-1" hidden></p>
-        <form id="login-form" class="auth-form" method="post" novalidate>
+        <form id="login-form" class="auth-form" method="post" action="/api/auth/login" novalidate>
           <div class="auth-field"><label for="login-email">이메일</label><input id="login-email" name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
           <div class="auth-field"><label for="login-password">비밀번호</label><input id="login-password" name="password" type="password" autocomplete="current-password" required></div>
           <button id="login-submit" class="auth-submit" type="submit" disabled>로그인</button>

@@ -10,9 +10,44 @@ export function initAuthUI(navigate) {
   const signupButton = document.querySelector('#signup-submit');
   const signupMessage = document.querySelector('#signup-message');
   const loginMessage = document.querySelector('#login-message');
+  const loginButton = document.querySelector('#login-submit');
+  const headerLogin = document.querySelector('#header-login');
+  const headerSession = document.querySelector('#header-session');
+  const logoutButton = document.querySelector('#header-logout');
   const fields = [...signupForm.querySelectorAll('input')];
   let submitting = false;
+  let loggingIn = false;
+  let loggingOut = false;
+  let sessionVersion = 0;
   let currentView;
+
+  function renderSession(authenticated) {
+    headerLogin.hidden = authenticated;
+    headerSession.hidden = !authenticated;
+  }
+
+  async function refreshSession() {
+    const version = ++sessionVersion;
+    try {
+      const response = await fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store', mode: 'same-origin', redirect: 'error' });
+      const data = await response.json().catch(() => null);
+      if (version !== sessionVersion) return null;
+      if (response.status === 401) { renderSession(false); return false; }
+      if (!response.ok || data?.ok !== true || typeof data.user?.id !== 'string') throw new Error('Session unavailable');
+      renderSession(true);
+      return true;
+    } catch {
+      if (version === sessionVersion) renderSession(false);
+      return null;
+    }
+  }
+
+  function notify(message) {
+    const toast = document.querySelector('#toast');
+    toast.textContent = message;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 4000);
+  }
 
   function showMessage(element, message) {
     element.textContent = message;
@@ -44,10 +79,75 @@ export function initAuthUI(navigate) {
     signupMessage.hidden = true;
   }));
 
-  loginForm.addEventListener('submit', event => {
+  loginForm.addEventListener('submit', async event => {
     event.preventDefault();
-    loginForm.elements.password.value = '';
-    showMessage(loginMessage, '로그인 기능은 다음 단계에서 연결됩니다.');
+    if (loggingIn || loggingOut) return;
+    const email = loginForm.elements.email.value.trim().toLowerCase();
+    const password = loginForm.elements.password.value;
+    if (!email || !password.trim()) {
+      showMessage(loginMessage, '이메일과 비밀번호를 입력해주세요.');
+      return;
+    }
+    if (Array.from(email).length > 254 || Array.from(password).length < 8 || Array.from(password).length > 128) {
+      showMessage(loginMessage, '이메일 또는 비밀번호가 올바르지 않습니다.');
+      return;
+    }
+    loggingIn = true;
+    ++sessionVersion; // Ignore an earlier /me response while login is in flight.
+    loginButton.disabled = true;
+    loginButton.textContent = '처리 중...';
+    loginForm.setAttribute('aria-busy', 'true');
+    loginMessage.hidden = true;
+    [...loginForm.querySelectorAll('input')].forEach(input => { input.disabled = true; });
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }), credentials: 'same-origin', mode: 'same-origin', redirect: 'error'
+      });
+      const data = await response.json().catch(() => null);
+      if (response.status === 200 && data?.ok === true) {
+        clearPasswords();
+        navigate('home');
+        const authenticated = await refreshSession();
+        if (authenticated !== true) notify('로그인 상태를 확인할 수 없습니다. 다시 시도해주세요.');
+      } else if (response.status === 401) {
+        showMessage(loginMessage, '이메일 또는 비밀번호가 올바르지 않습니다.');
+      } else {
+        showMessage(loginMessage, '로그인 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      }
+    } catch {
+      showMessage(loginMessage, '네트워크 연결을 확인한 후 다시 시도해주세요.');
+    } finally {
+      loggingIn = false;
+      loginButton.disabled = false;
+      loginButton.textContent = '로그인';
+      loginForm.removeAttribute('aria-busy');
+      [...loginForm.querySelectorAll('input')].forEach(input => { input.disabled = false; });
+    }
+  });
+
+  logoutButton.addEventListener('click', async () => {
+    if (loggingOut || loggingIn) return;
+    loggingOut = true;
+    ++sessionVersion;
+    logoutButton.disabled = true;
+    logoutButton.textContent = '처리 중...';
+    try {
+      const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin', mode: 'same-origin', redirect: 'error' });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || data?.ok !== true) throw new Error('Logout unavailable');
+      renderSession(false);
+      clearPasswords();
+      navigate('home');
+      headerLogin.focus({ preventScroll: true });
+      notify('로그아웃되었습니다.');
+    } catch {
+      notify('로그아웃 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+      loggingOut = false;
+      logoutButton.disabled = false;
+      logoutButton.textContent = '로그아웃';
+    }
   });
 
   signupForm.addEventListener('submit', async event => {
@@ -127,6 +227,10 @@ export function initAuthUI(navigate) {
   document.querySelector('#login-submit').disabled = false;
   signupButton.disabled = false;
   window.addEventListener('pagehide', clearPasswords);
+  refreshSession();
+  // Recheck after returning from the browser back/forward cache or another tab.
+  window.addEventListener('pageshow', event => { if (event.persisted && !loggingIn && !loggingOut) refreshSession(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !loggingIn && !loggingOut) refreshSession(); });
 
   return viewName => {
     if (viewName === currentView) return;
