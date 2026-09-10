@@ -1,5 +1,6 @@
 import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.mjs';
 import { initAuthUI } from './auth.js';
+import { initMyPage } from './mypage.js';
 
 // PDF.js 본체와 워커는 반드시 같은 버전을 사용한다.
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.worker.mjs';
@@ -2853,6 +2854,7 @@ document.querySelectorAll('[data-coming-soon]').forEach((link) => {
 });
 
 const appViews = {
+  mypage: document.querySelector('#mypage'),
   home: document.querySelector('#home'),
   login: document.querySelector('#login'),
   signup: document.querySelector('#signup'),
@@ -2862,6 +2864,21 @@ const appViews = {
   'risk-survey-create': document.querySelector('#risk-survey-create'),
   'risk-survey-preview': document.querySelector('#risk-survey-preview')
 };
+
+// Read-only adapters around the existing final preview data. No parser/editor mutation.
+const updateMyPageView = initMyPage((viewName) => {
+  if (window.location.hash !== `#${viewName}`) history.pushState({ viewName }, '', `#${viewName}`);
+  showAppView(viewName);
+}, () => results.hidden ? null : getFinalWarningLabelData(), () => {
+  if (document.querySelector('#process-preview').hidden) return null;
+  const data = window.__hssoProcessGuideEditableData;
+  if (!data) return null;
+  return structuredClone({ productName: data.productName, signalWord: data.signalWord, ghs: data.ghs,
+    hazardStatements: data.hazardStatements, handling: { safeHandling: data.handling.safeHandling },
+    firstAid: { eye: data.firstAid.eye, skin: data.firstAid.skin, inhalation: data.firstAid.inhalation, ingestion: data.firstAid.ingestion },
+    accidentResponse: { fire: data.accidentResponse.fire, spill: data.accidentResponse.spill },
+    selectedPpe: data.selectedPpe, ppeNone: data.ppeNone });
+});
 
 const updateAuthView = initAuthUI((viewName) => {
   if (window.location.hash !== `#${viewName}`) history.pushState({ viewName }, '', `#${viewName}`);
@@ -2886,6 +2903,7 @@ function showAppView(viewName) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   setMsdsMenuOpen(false);
   updateAuthView(nextView.id);
+  updateMyPageView(nextView.id);
 }
 
 document.querySelectorAll('[data-view-link]').forEach((link) => {
@@ -2919,6 +2937,7 @@ document.querySelectorAll('[data-home-tools], [data-home-section]').forEach((lin
 });
 
 if (window.location.hash === '#maker') showAppView('maker');
+if (window.location.hash === '#mypage') showAppView('mypage');
 if (['#home-tools', '#home-about'].includes(window.location.hash)) scrollToHomeSection(window.location.hash.slice(1));
 if (window.location.hash === '#process-guide') showAppView('process-guide');
 if (window.location.hash === '#risk-assessment') showAppView('risk-assessment');

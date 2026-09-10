@@ -27,6 +27,7 @@ export function createTestDB() {
           calls.push({ sql, args });
           return {
             async first() { return statement.get(...args) || null; },
+            async all() { return { success: true, results: statement.all(...args) }; },
             async run() {
               const result = statement.run(...args);
               return { success: true, meta: { changes: Number(result.changes) } };

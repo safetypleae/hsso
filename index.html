@@ -6,6 +6,7 @@
   <meta name="description" content="MSDS 경고표지부터 작업공정별 관리요령, 위험성평가까지. 안전보건관리자의 반복적인 실무를 돕는 HSSO입니다.">
   <title>HSSO | 안전보건 실무 지원 플랫폼</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="mypage.css">
   <link rel="stylesheet" href="assets/home/hero.css">
 </head>
 <body>
@@ -28,7 +29,7 @@
       <div class="header-account">
         <button id="header-login" class="login-button" type="button" data-view-link="login">로그인</button>
         <div id="header-session" class="header-session" hidden>
-          <button class="account-button" type="button" data-coming-soon="마이페이지는 준비 중입니다.">마이페이지</button>
+          <button class="account-button" type="button" data-view-link="mypage">마이페이지</button>
           <button id="header-logout" class="account-button" type="button">로그아웃</button>
         </div>
       </div>
@@ -209,6 +210,8 @@
           <div id="print-preview" class="print-sheet-preview" aria-live="polite"></div>
           <p class="preview-note">미리보기는 작성 편의를 위한 화면이며, 최종 사용 전 원본 MSDS 및 관련 기준을 확인해야 합니다.</p>
           <button id="download-pdf" class="primary-button pdf-download-button" type="button">PDF 다운로드</button>
+          <button id="save-warning" class="secondary-button" type="button">내 문서에 저장</button>
+          <p id="save-warning-status" role="status" aria-live="polite"></p>
           <p id="pdf-download-message" class="pdf-download-message" role="status" aria-live="polite" hidden></p>
         </aside>
       </div>
@@ -390,8 +393,10 @@
         <div class="process-preview-actions">
           <button id="process-edit-again" class="secondary-button" type="button">내용 수정</button>
           <button id="process-download-pdf" class="primary-button" type="button">PDF 출력</button>
+          <button id="save-process" class="secondary-button" type="button">내 문서에 저장</button>
         </div>
         <p id="process-pdf-message" class="process-pdf-message" role="status" aria-live="polite" hidden></p>
+        <p id="save-process-status" role="status" aria-live="polite"></p>
       </section>
     </section>
   </main>
@@ -611,6 +616,23 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <main id="mypage" class="my-page section-shell" aria-label="마이페이지" hidden>
+    <aside class="my-sidebar">
+      <p class="my-eyebrow">MY HSSO</p>
+      <nav id="my-nav" aria-label="마이페이지 메뉴" hidden>
+        <button type="button" data-my-section="dashboard">대시보드</button>
+        <button type="button" data-my-section="profile">내 정보</button>
+        <button type="button" data-my-section="documents">내 문서</button>
+        <button type="button" data-my-section="risk">위험성평가</button>
+      </nav>
+    </aside>
+    <div class="my-main"><p id="my-status" role="status" aria-live="polite"></p><div id="my-content"></div></div>
+  </main>
+  <dialog id="my-delete-dialog" class="my-dialog" aria-labelledby="my-delete-question" aria-describedby="my-delete-title">
+    <h2 id="my-delete-question">이 문서를 삭제하시겠습니까?</h2>
+    <p id="my-delete-title"></p><p id="my-delete-status" role="status" aria-live="polite"></p>
+    <div class="my-actions"><button id="my-delete-cancel" class="secondary-button" type="button">취소</button><button id="my-delete-confirm" class="primary-button" type="button">확인</button></div>
+  </dialog>
   <footer class="site-footer"><div class="section-shell"><div class="footer-brand"><a href="#home" data-view-link="home" aria-label="HSSO 홈">HSSO<span>.</span></a><p>안전보건 실무 지원 플랫폼</p></div><small>© HSSO. All rights reserved.</small></div></footer>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
