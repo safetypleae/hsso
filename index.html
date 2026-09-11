@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="mypage.css">
   <link rel="stylesheet" href="assets/home/hero.css">
+  <link rel="stylesheet" href="assets/boards.css">
 </head>
 <body>
   <header class="site-header">
@@ -54,7 +55,7 @@
       <div class="portal-shell">
         <header class="portal-brand"><p>SAFETY &amp; HEALTH WORK PORTAL</p><h1 id="home-title">HSSO<span>.</span></h1><strong id="home-welcome">오늘도 안전한 하루 보내세요.</strong><small>안전보건 실무를 더 빠르고 정확하게.</small><div id="home-portal-metrics" class="portal-hero-metrics" hidden></div></header>
         <div class="portal-first-grid">
-          <section class="portal-widget portal-floating-notice" data-board="notice"><header><h2>공지사항</h2><span>NOTICE</span></header><p class="portal-empty">등록된 공지사항이 없습니다.</p></section>
+          <section class="portal-widget portal-floating-notice" data-board="notice"><header><h2>공지사항</h2><a href="#boards" data-view-link="boards" data-board-open="notice">전체보기</a></header><p class="portal-empty">등록된 공지사항이 없습니다.</p></section>
           <section class="portal-widget portal-recent" aria-labelledby="home-recent-title"><header><h2 id="home-recent-title">최근 사용 양식</h2><a href="#mypage" data-view-link="mypage">전체보기</a></header><div id="home-recent-documents"><p class="portal-empty">로그인하면 최근 사용 양식을 확인할 수 있습니다.</p></div></section>
           <aside class="portal-quiz"><span>DAILY SAFETY</span><h2>오늘의 안전퀴즈</h2><p>매일 한 문제로<br>안전상식을 확인하세요.</p><button type="button" data-coming-soon="오늘의 안전퀴즈는 준비 중입니다.">준비 중</button></aside>
         </div>
@@ -67,11 +68,11 @@
         <header class="portal-section-title"><div><p>MY WORKSPACE</p><h2 id="home-tools-title">안전보건 업무 대시보드</h2></div><nav aria-label="빠른 실행"><a href="#maker" data-view-link="maker">경고표지</a><a href="#process-guide" data-view-link="process-guide">관리요령</a><a href="#risk-assessment" data-view-link="risk-assessment">위험성평가</a></nav></header>
         <div class="portal-dashboard-grid">
           <section class="portal-widget portal-profile" aria-labelledby="home-profile-title"><header><h2 id="home-profile-title">나의 업무</h2><a href="#mypage" data-view-link="mypage">MY HSSO</a></header><div id="home-personal-dashboard"><p class="portal-empty">로그인하면 개인 대시보드를 사용할 수 있습니다.</p><button class="portal-login-link" type="button" data-view-link="login">로그인</button></div></section>
-          <section class="portal-widget portal-board-wide" data-board="notice"><header><h2>공지사항</h2><span>NOTICE</span></header><p class="portal-empty">등록된 공지사항이 없습니다.</p></section>
-          <section class="portal-widget portal-board-wide" data-board="community"><header><h2>자유게시판</h2><span>COMMUNITY</span></header><p class="portal-empty">등록된 게시글이 없습니다.</p></section>
+          <section class="portal-widget portal-board-wide" data-board="notice"><header><h2>공지사항</h2><a href="#boards" data-view-link="boards" data-board-open="notice">전체보기</a></header><p class="portal-empty">등록된 공지사항이 없습니다.</p></section>
+          <section class="portal-widget portal-board-wide" data-board="community"><header><h2>자유게시판</h2><a href="#boards" data-view-link="boards" data-board-open="free">전체보기</a></header><p class="portal-empty">등록된 게시글이 없습니다.</p></section>
           <section class="portal-widget portal-my-hsso"><header><h2>MY HSSO</h2><span>PLAN</span></header><dl><div><dt>안전 포인트</dt><dd>포인트 기능 준비 중</dd></div><div><dt>구독 사용량</dt><dd>구독 기능 준비 중</dd></div></dl><div class="portal-progress" aria-hidden="true"><span></span></div></section>
-          <section class="portal-widget portal-inquiry"><header><h2>문의사항</h2><span>SUPPORT</span></header><p>HSSO 이용 중 불편사항이나 기능 요청을 남겨주세요.</p><button type="button" data-coming-soon="문의 등록 기능은 준비 중입니다.">문의하기</button></section>
-          <section class="portal-widget portal-sites"><header><h2>업무사이트</h2><span>LINKS</span></header><ul><li>국가법령정보센터 <small>준비 중</small></li><li>고용노동부 <small>준비 중</small></li><li>한국산업안전보건공단 <small>준비 중</small></li><li>산업재해조사표 제출 <small>준비 중</small></li></ul></section>
+          <section class="portal-widget portal-inquiry"><header><h2>문의사항</h2><span>SUPPORT</span></header><p>HSSO 이용 중 불편사항이나 기능 요청을 남겨주세요.</p><button type="button" data-view-link="boards" data-inquiry-open>문의하기</button></section>
+          <section class="portal-widget portal-sites"><header><h2>업무사이트</h2><span>LINKS</span></header><ul><li><a href="https://www.law.go.kr/법령/산업안전보건법" target="_blank" rel="noopener noreferrer">산업안전보건법 <span aria-hidden="true">↗</span></a></li><li><a href="https://www.law.go.kr/법령/중대재해처벌등에관한법률" target="_blank" rel="noopener noreferrer">중대재해 처벌 등에 관한 법률 <span aria-hidden="true">↗</span></a></li><li><a href="https://www.moel.go.kr/" target="_blank" rel="noopener noreferrer">고용노동부 <span aria-hidden="true">↗</span></a></li><li><a href="https://www.kosha.or.kr/" target="_blank" rel="noopener noreferrer">한국산업안전보건공단 <span aria-hidden="true">↗</span></a></li><li><a href="https://labor.moel.go.kr/minwonApply/minwonForm.do?searchVal=AH038&amp;searchGubun=1&amp;searchRIm=2" target="_blank" rel="noopener noreferrer">산업재해조사표 제출 <span aria-hidden="true">↗</span></a></li></ul></section>
           <section class="portal-widget portal-ppe"><header><h2>보호구 구매</h2><span>PARTNERS</span></header><p>검증된 보호구 공급·제휴 서비스를 준비하고 있습니다.</p><div><span>안전화</span><span>안전모</span><span>보호안경</span><span>방진마스크</span><span>보호장갑</span></div></section>
         </div>
         <section id="home-about" class="portal-about" tabindex="-1"><strong>ABOUT HSSO</strong><p>반복적인 안전보건 실무를 줄이고, 현장에 더 가까운 업무 환경을 만듭니다.</p></section>
@@ -580,6 +581,11 @@
     </form>
   </main>
 
+  <main id="boards" class="board-page section-shell" aria-labelledby="board-page-title" hidden>
+    <aside class="board-sidebar"><p>BOARD</p><h2>게시판</h2><nav aria-label="게시판 종류"><button type="button" data-board-select="notice">공지사항</button><button type="button" data-board-select="free">자유게시판</button><button type="button" data-board-select="inquiry">문의사항</button></nav></aside>
+    <section class="board-main"><p id="board-status" role="status" aria-live="polite"></p><div id="board-content"></div></section>
+  </main>
+
   <main id="login" class="auth-view" aria-labelledby="login-title" hidden>
     <div class="auth-layout">
       <div class="auth-brand-area">
@@ -648,5 +654,6 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script type="module" src="script.js"></script>
   <script type="module" src="assets/home/home-dashboard.js"></script>
+  <script type="module" src="assets/boards.js"></script>
 </body>
 </html>

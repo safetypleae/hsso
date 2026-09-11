@@ -173,6 +173,29 @@ async function request(path) {
   return data;
 }
 
+function renderBoardWidget(selector, type, posts) {
+  document.querySelectorAll(selector).forEach(widget => {
+    [...widget.children].filter(child => child.tagName !== 'HEADER').forEach(child => child.remove());
+    if (!posts.length) { widget.append(node('p', type === 'notice' ? '등록된 공지사항이 없습니다.' : '등록된 게시글이 없습니다.', 'portal-empty')); return; }
+    const list = node('ul', '', 'portal-board-list');
+    for (const post of posts.slice(0, 4)) {
+      const item = document.createElement('li'), open = node('button', post.title); open.type = 'button';
+      open.addEventListener('click', () => document.querySelector(`[data-board-open="${type}"]`)?.click());
+      item.append(open, node('time', new Date(post.createdAt).toLocaleDateString('ko-KR', { timeZone:'Asia/Seoul' }))); list.append(item);
+    }
+    widget.append(list);
+  });
+}
+
+async function refreshHomeBoards() {
+  const [notices, freePosts] = await Promise.all([
+    request('/api/boards?type=notice&limit=4&offset=0').catch(() => null),
+    request('/api/boards?type=free&limit=4&offset=0').catch(() => null)
+  ]);
+  if (notices) renderBoardWidget('[data-board="notice"]', 'notice', notices.posts);
+  if (freePosts) renderBoardWidget('[data-board="community"]', 'free', freePosts.posts);
+}
+
 async function refreshHomeDashboard() {
   const version = ++dashboardVersion;
   let session;
@@ -209,3 +232,5 @@ const sessionObserver = new MutationObserver(() => {
 });
 sessionObserver.observe(headerSession, { attributes: true, attributeFilter: ['hidden'] });
 refreshHomeDashboard();
+refreshHomeBoards();
+window.addEventListener('hsso:boards-changed', refreshHomeBoards);

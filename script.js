@@ -2866,7 +2866,8 @@ const appViews = {
   'process-guide': document.querySelector('#process-guide'),
   'risk-assessment': document.querySelector('#risk-assessment'),
   'risk-survey-create': document.querySelector('#risk-survey-create'),
-  'risk-survey-preview': document.querySelector('#risk-survey-preview')
+  'risk-survey-preview': document.querySelector('#risk-survey-preview'),
+  boards: document.querySelector('#boards')
 };
 
 // Read-only adapters around the existing final preview data. No parser/editor mutation.
@@ -2951,6 +2952,7 @@ if (['#home-tools', '#home-about'].includes(window.location.hash)) scrollToHomeS
 if (window.location.hash === '#process-guide') showAppView('process-guide');
 if (window.location.hash === '#risk-assessment') showAppView('risk-assessment');
 if (window.location.hash === '#risk-survey-create') showAppView('risk-survey-create');
+if (window.location.hash === '#boards') showAppView('boards');
 if (['#login', '#signup'].includes(window.location.hash)) showAppView(window.location.hash.slice(1));
 
 document.querySelector('#risk-survey-form').addEventListener('submit', (event) => event.preventDefault());
