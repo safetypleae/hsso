@@ -3035,6 +3035,91 @@ document.querySelectorAll('input[name="workerHasHazard"]').forEach((input) => {
 });
 document.querySelector('#worker-survey-form').addEventListener('submit', (event) => {
   event.preventDefault();
-  document.querySelector('#worker-submit-message').hidden = false;
+  submitWorkerSurvey();
 });
 if (window.location.hash === '#risk-survey-preview') showAppView('risk-survey-preview');
+
+const surveyQuestions = () => {
+  const questions = [...document.querySelectorAll('#survey-question-1, #survey-question-2, #survey-question-3, #survey-question-4, #survey-question-5, #survey-question-6, #survey-question-7, #survey-question-8')].map((node, index) => ({
+    id: `q${index + 1}`,
+    type: node.querySelector('.survey-question-type')?.textContent.trim() || 'text',
+    text: node.querySelector('h3')?.textContent.trim() || '',
+    options: [...node.querySelectorAll('.survey-choice-list li')].map(item => item.textContent.trim())
+  }));
+  questions.push({ id: 'safe_reason', type: 'single_choice', text: document.querySelector('#survey-no-risk-heading').textContent.trim(), options: [...document.querySelectorAll('.survey-reason-list li')].map(item => item.textContent.trim()) });
+  return questions;
+};
+
+function builderSurveyData() {
+  const checked = id => document.getElementById(id).checked;
+  return {
+    title: document.getElementById('survey-title').value.trim(), target: document.getElementById('survey-target').value.trim(),
+    startDate: document.getElementById('survey-start-date').value, endDate: document.getElementById('survey-end-date').value,
+    guidance: document.getElementById('survey-description').value,
+    settings: { collectName: checked('survey-collect-name'), collectDepartment: checked('survey-collect-department'), collectEmployeeId: checked('survey-collect-employee-id'), allowAnonymous: checked('survey-allow-anonymous'), allowDuplicates: checked('survey-allow-duplicates'), allowEdit: checked('survey-allow-edit'), allowPhoto: checked('survey-allow-photo') },
+    questions: surveyQuestions(), isActive: checked('survey-active')
+  };
+}
+
+document.getElementById('survey-create-button').addEventListener('click', async () => {
+  const trigger = document.getElementById('survey-create-button'), note = document.getElementById('survey-action-note'), data = builderSurveyData();
+  if (!data.title || !data.target || !data.startDate || !data.endDate || data.startDate > data.endDate || !data.questions.length) { note.textContent = '제목, 대상, 올바른 실시기간을 입력해주세요.'; return; }
+  trigger.disabled = true; note.textContent = '설문을 저장하는 중입니다.';
+  try {
+    const response = await fetch('/api/risk-surveys', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const result = await response.json().catch(() => null);
+    if (response.status === 401) { note.textContent = '설문을 저장하려면 로그인이 필요합니다.'; history.pushState({ viewName: 'login' }, '', '#login'); showAppView('login'); return; }
+    if (!response.ok || !result?.ok) throw new Error();
+    const url = `${location.origin}/survey/${result.survey.publicToken}`;
+    note.replaceChildren(document.createTextNode('설문 저장 완료 · '));
+    const link = document.createElement('a'); link.href = url; link.textContent = url; link.target = '_blank'; link.rel = 'noopener';
+    const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'secondary-button survey-copy-button'; copy.textContent = '링크 복사';
+    copy.addEventListener('click', async () => { await navigator.clipboard.writeText(url); copy.textContent = '복사됨'; });
+    note.append(link, document.createTextNode(' '), copy, document.createTextNode(' · 마이페이지에서 관리할 수 있습니다.'));
+  } catch { note.textContent = '설문을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.'; }
+  finally { trigger.disabled = false; }
+});
+
+let publicSurveyToken = null;
+function applyPublicSurvey(survey) {
+  document.getElementById('worker-survey-title').textContent = survey.title;
+  document.getElementById('worker-survey-target').textContent = survey.target;
+  document.getElementById('worker-survey-period').textContent = `${survey.startDate} ~ ${survey.endDate}`;
+  document.getElementById('worker-survey-description').textContent = survey.guidance;
+  const pairs = [['collectName','worker-name'],['collectDepartment','worker-department'],['collectEmployeeId','worker-employee-id']];
+  for (const [setting,id] of pairs) { document.getElementById(`${id}-field`).hidden = !survey.settings[setting]; document.getElementById(id).disabled = !survey.settings[setting]; document.getElementById(id).required = survey.settings[setting] && !survey.settings.allowAnonymous; }
+  document.getElementById('worker-anonymous-note').textContent = survey.settings.allowAnonymous ? '익명 응답이 허용됩니다. 개인정보를 비우면 익명으로 제출됩니다.' : '표시된 참여자 정보를 입력해주세요.';
+  document.getElementById('worker-photo-field').hidden = !survey.settings.allowPhoto;
+  document.getElementById('worker-photo').disabled = true;
+  if (survey.settings.allowPhoto) document.querySelector('#worker-photo-field .survey-help').textContent = '사진 첨부 기능은 준비 중입니다.';
+  document.querySelector('.site-header').hidden = true; document.querySelector('.site-footer').hidden = true;
+}
+
+async function loadPublicSurvey(token) {
+  publicSurveyToken = token; showAppView('risk-survey-preview');
+  document.querySelector('#risk-survey-preview > .back-button').hidden = true;
+  const message = document.getElementById('worker-submit-message'); message.hidden = false; message.textContent = '설문을 불러오는 중입니다.';
+  try {
+    const response = await fetch(`/api/public/risk-surveys/${encodeURIComponent(token)}`, { credentials: 'omit', cache: 'no-store' }); const result = await response.json().catch(() => null);
+    if (!response.ok) { const messages = { SURVEY_INACTIVE: '현재 응답을 받고 있지 않은 설문입니다.', SURVEY_NOT_STARTED: '아직 시작되지 않은 설문입니다.', SURVEY_ENDED: '종료된 설문입니다.' }; throw Object.assign(new Error(), { message: messages[result?.error] || '설문을 찾을 수 없습니다.' }); }
+    applyPublicSurvey(result.survey); message.hidden = true;
+  } catch (error) { document.getElementById('worker-survey-form').querySelectorAll('input,textarea,button').forEach(node => node.disabled = true); message.textContent = error.message || '설문을 불러오지 못했습니다.'; }
+}
+
+async function submitWorkerSurvey() {
+  const message = document.getElementById('worker-submit-message');
+  if (!publicSurveyToken) { message.hidden = false; message.textContent = '미리보기에서는 응답이 저장되지 않습니다.'; return; }
+  const button = document.getElementById('worker-submit-button'), hasHazardValue = document.querySelector('input[name="workerHasHazard"]:checked')?.value;
+  if (!hasHazardValue) { message.hidden = false; message.textContent = '위험요인 여부를 선택해주세요.'; return; }
+  const value = id => document.getElementById(id).value.trim(); const selected = name => document.querySelector(`input[name="${name}"]:checked`)?.value;
+  const hasHazard = hasHazardValue === 'yes';
+  const data = { respondentName:value('worker-name'), department:value('worker-department'), employeeId:value('worker-employee-id'), isAnonymous: !value('worker-name') && !value('worker-department') && !value('worker-employee-id'), hasHazard,
+    hazardTypes:[...document.querySelectorAll('input[name="workerHazardTypes"]:checked')].map(node => node.parentElement.textContent.trim()), hazardDescription:value('worker-hazard-description'), location:value('worker-hazard-location'), improvementSuggestion:value('worker-improvement'), safeReason:document.querySelector('input[name="workerSafeReason"]:checked')?.parentElement.textContent.trim() || '',
+    preLikelihood:hasHazard ? Number(selected('worker-before-likelihood')) || null : null, preSeverity:hasHazard ? Number(selected('worker-before-severity')) || null : null, postLikelihood:hasHazard ? Number(selected('worker-after-likelihood')) || null : null, postSeverity:hasHazard ? Number(selected('worker-after-severity')) || null : null };
+  button.disabled = true; message.hidden = false; message.textContent = '응답을 제출하는 중입니다.';
+  try { const response = await fetch(`/api/public/risk-surveys/${encodeURIComponent(publicSurveyToken)}/responses`, { method:'POST', credentials:'omit', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }); const result=await response.json().catch(()=>null); if(!response.ok) throw Object.assign(new Error(),{code:result?.error}); message.textContent='응답이 제출되었습니다.'; document.getElementById('worker-survey-form').querySelectorAll('input,textarea,button').forEach(node=>node.disabled=true); localStorage.setItem(`hsso-risk-${publicSurveyToken}`,'submitted'); }
+  catch(error) { button.disabled=false; message.textContent=error.code==='DUPLICATE_RESPONSE'?'이미 제출된 사번입니다.':'입력 내용을 확인한 뒤 다시 제출해주세요.'; }
+}
+
+const publicPathMatch = /^\/survey\/([a-f0-9]{64})\/?$/.exec(location.pathname);
+if (publicPathMatch) loadPublicSurvey(publicPathMatch[1]);
