@@ -13,7 +13,7 @@
 <body>
   <header class="site-header">
     <div class="header-inner">
-      <a class="logo" href="#home" aria-label="HSSO 홈" data-view-link="home">HSSO<span>.</span></a>
+      <button id="portal-menu-button" class="portal-menu-button" type="button" aria-expanded="false" aria-controls="portal-menu" aria-label="전체메뉴 열기"><span aria-hidden="true"></span></button>
       <button class="menu-button" type="button" aria-expanded="false" aria-controls="main-menu">메뉴</button>
       <nav id="main-menu" class="main-nav" aria-label="주요 메뉴">
         <a href="#home-about" data-home-section="home-about">소개</a>
@@ -30,49 +30,58 @@
       <div class="header-account">
         <button id="header-login" class="login-button" type="button" data-view-link="login">로그인</button>
         <div id="header-session" class="header-session" hidden>
-          <button class="account-button" type="button" data-view-link="mypage">마이페이지</button>
+          <button class="account-button portal-account" type="button" data-view-link="mypage"><strong id="header-user-name">마이페이지</strong><span id="header-user-org"></span></button>
           <button id="header-logout" class="account-button" type="button">로그아웃</button>
         </div>
       </div>
     </div>
   </header>
 
+  <div id="portal-overlay" class="portal-overlay" hidden></div>
+  <aside id="portal-menu" class="portal-menu" aria-labelledby="portal-menu-title" hidden>
+    <header><a class="logo" href="#home" data-view-link="home">HSSO<span>.</span></a><button id="portal-menu-close" type="button" aria-label="전체메뉴 닫기">×</button></header>
+    <h2 id="portal-menu-title" class="sr-only">전체메뉴</h2>
+    <nav aria-label="HSSO 전체메뉴">
+      <section><h3>MSDS</h3><a href="#maker" data-view-link="maker">경고표지 만들기</a><a href="#process-guide" data-view-link="process-guide">작업공정별 관리요령</a><button type="button" data-coming-soon="MSDS 관리대장은 준비 중입니다.">MSDS 관리대장 <small>준비 중</small></button></section>
+      <section><h3>위험성평가</h3><a href="#risk-assessment" data-view-link="risk-assessment">위험성평가</a><a href="#risk-survey-create" data-view-link="risk-survey-create">설문 만들기</a></section>
+      <section><h3>MY HSSO</h3><a href="#mypage" data-view-link="mypage">마이페이지</a><button type="button" data-home-my-section="documents">내 문서</button><button type="button" data-home-my-section="risk">위험성평가 관리</button></section>
+      <section><h3>기타</h3><a href="#home-about" data-home-section="home-about">소개</a><a href="#login" data-view-link="login">로그인</a><a href="#signup" data-view-link="signup">회원가입</a></section>
+    </nav>
+  </aside>
+
   <main id="home" class="home-view" aria-labelledby="home-title">
-    <section class="home-hero" aria-labelledby="home-title">
-      <div class="home-hero-media" aria-hidden="true"><div class="home-hero-photo"></div></div>
-      <div class="home-hero-content section-shell">
-        <p class="home-eyebrow">FOR A SAFER WORKPLACE</p>
-        <h1 id="home-title">안전한 현장을 <span class="home-phrase">만드는 일,</span><br>더 나은 방식으로.</h1>
-        <p class="home-intro">안전보건 실무의 새로운 기준을 만들어갑니다.</p>
-        <a class="home-hero-link" href="#home-tools" data-home-tools>서비스 둘러보기 <span aria-hidden="true">↓</span></a>
-      </div>
-      <div class="home-hero-bottom section-shell" aria-hidden="true"><span>HSSO · SAFETY &amp; HEALTH</span><span class="home-scroll-line"></span><span>SCROLL TO EXPLORE</span></div>
-    </section>
-
-    <section id="home-tools" class="home-tools section-shell" aria-labelledby="home-tools-title" tabindex="-1">
-      <header class="home-section-heading"><p class="home-eyebrow">HSSO SERVICES</p><h2 id="home-tools-title">현장에서 필요한 <span class="home-phrase">안전보건 업무를</span><br>더 체계적으로.</h2></header>
-      <div class="home-service-list">
-        <a class="home-service" href="#maker" data-view-link="maker" aria-labelledby="home-service-1">
-          <span class="home-service-number">01</span><h3 id="home-service-1">경고표지</h3><p>MSDS를 기반으로 필요한 정보를 확인하고<br class="home-desktop-break"> 경고표지를 제작합니다.</p><span class="home-service-arrow" aria-hidden="true">↗</span>
-        </a>
-        <a class="home-service" href="#process-guide" data-view-link="process-guide" aria-labelledby="home-service-2">
-          <span class="home-service-number">02</span><h3 id="home-service-2">작업공정별 관리요령</h3><p>화학물질의 안전한 취급을 위해<br class="home-desktop-break"> MSDS 정보를 관리요령으로 정리합니다.</p><span class="home-service-arrow" aria-hidden="true">↗</span>
-        </a>
-        <a class="home-service" href="#risk-assessment" data-view-link="risk-assessment" aria-labelledby="home-service-3">
-          <span class="home-service-number">03</span><h3 id="home-service-3">위험성평가</h3><p>근로자의 위험요인 의견과<br class="home-desktop-break"> 개선 전·후 위험성을 체계적으로 수집합니다.</p><span class="home-service-arrow" aria-hidden="true">↗</span>
-        </a>
-      </div>
-      <div class="home-upcoming" aria-labelledby="home-upcoming-title"><h3 id="home-upcoming-title">COMING NEXT <span>서비스 준비 중</span></h3><ul><li>MSDS 관리대장</li><li>TBM</li></ul></div>
-    </section>
-
-    <section id="home-about" class="home-about" aria-labelledby="home-about-title" tabindex="-1">
-      <div class="section-shell home-about-grid">
-        <div class="home-about-heading"><p class="home-eyebrow">ABOUT HSSO</p><h2 id="home-about-title">반복을 줄이고,<br>현장에 더 가까이.</h2></div>
-        <div class="home-about-copy"><p>안전보건 업무는 현장과 문서 사이에서<br class="home-desktop-break"> 수많은 반복을 요구합니다.</p><p>HSSO는 그 반복을 줄이고,<br class="home-desktop-break"> 더 중요한 안전보건 업무에 집중할 수 있는<br class="home-desktop-break"> 환경을 만들어갑니다.</p><span class="home-about-signature">HSSO</span></div>
+    <section class="portal-screen portal-screen-primary" aria-labelledby="home-title">
+      <div class="portal-shell">
+        <header class="portal-brand"><p>SAFETY &amp; HEALTH WORK PORTAL</p><h1 id="home-title">HSSO<span>.</span></h1><strong id="home-welcome">오늘도 안전한 하루 보내세요.</strong><small>안전보건 실무를 더 빠르고 정확하게.</small><div id="home-portal-metrics" class="portal-hero-metrics" hidden></div></header>
+        <div class="portal-first-grid">
+          <section class="portal-widget portal-floating-notice" data-board="notice"><header><h2>공지사항</h2><span>NOTICE</span></header><p class="portal-empty">등록된 공지사항이 없습니다.</p></section>
+          <section class="portal-widget portal-recent" aria-labelledby="home-recent-title"><header><h2 id="home-recent-title">최근 사용 양식</h2><a href="#mypage" data-view-link="mypage">전체보기</a></header><div id="home-recent-documents"><p class="portal-empty">로그인하면 최근 사용 양식을 확인할 수 있습니다.</p></div></section>
+          <aside class="portal-quiz"><span>DAILY SAFETY</span><h2>오늘의 안전퀴즈</h2><p>매일 한 문제로<br>안전상식을 확인하세요.</p><button type="button" data-coming-soon="오늘의 안전퀴즈는 준비 중입니다.">준비 중</button></aside>
+        </div>
+        <a class="portal-next" href="#home-tools" data-home-tools>업무 대시보드 보기 <span aria-hidden="true">↓</span></a>
       </div>
     </section>
 
-    <section class="home-bottom-cta section-shell" aria-labelledby="home-cta-title"><div><p class="home-eyebrow">YOUR NEXT STEP</p><h2 id="home-cta-title">더 나은 실무의 시작, HSSO.</h2></div><a class="home-text-link" href="#home-tools" data-home-tools>서비스 둘러보기 <span aria-hidden="true">→</span></a></section>
+    <section id="home-tools" class="portal-screen portal-screen-dashboard" aria-labelledby="home-tools-title" tabindex="-1">
+      <div class="portal-shell">
+        <header class="portal-section-title"><div><p>MY WORKSPACE</p><h2 id="home-tools-title">안전보건 업무 대시보드</h2></div><nav aria-label="빠른 실행"><a href="#maker" data-view-link="maker">경고표지</a><a href="#process-guide" data-view-link="process-guide">관리요령</a><a href="#risk-assessment" data-view-link="risk-assessment">위험성평가</a></nav></header>
+        <div class="portal-dashboard-grid">
+          <section class="portal-widget portal-profile" aria-labelledby="home-profile-title"><header><h2 id="home-profile-title">나의 업무</h2><a href="#mypage" data-view-link="mypage">MY HSSO</a></header><div id="home-personal-dashboard"><p class="portal-empty">로그인하면 개인 대시보드를 사용할 수 있습니다.</p><button class="portal-login-link" type="button" data-view-link="login">로그인</button></div></section>
+          <section class="portal-widget portal-board-wide" data-board="notice"><header><h2>공지사항</h2><span>NOTICE</span></header><p class="portal-empty">등록된 공지사항이 없습니다.</p></section>
+          <section class="portal-widget portal-board-wide" data-board="community"><header><h2>자유게시판</h2><span>COMMUNITY</span></header><p class="portal-empty">등록된 게시글이 없습니다.</p></section>
+          <section class="portal-widget portal-my-hsso"><header><h2>MY HSSO</h2><span>PLAN</span></header><dl><div><dt>안전 포인트</dt><dd>포인트 기능 준비 중</dd></div><div><dt>구독 사용량</dt><dd>구독 기능 준비 중</dd></div></dl><div class="portal-progress" aria-hidden="true"><span></span></div></section>
+          <section class="portal-widget portal-inquiry"><header><h2>문의사항</h2><span>SUPPORT</span></header><p>HSSO 이용 중 불편사항이나 기능 요청을 남겨주세요.</p><button type="button" data-coming-soon="문의 등록 기능은 준비 중입니다.">문의하기</button></section>
+          <section class="portal-widget portal-sites"><header><h2>업무사이트</h2><span>LINKS</span></header><ul><li>국가법령정보센터 <small>준비 중</small></li><li>고용노동부 <small>준비 중</small></li><li>한국산업안전보건공단 <small>준비 중</small></li><li>산업재해조사표 제출 <small>준비 중</small></li></ul></section>
+          <section class="portal-widget portal-ppe"><header><h2>보호구 구매</h2><span>PARTNERS</span></header><p>검증된 보호구 공급·제휴 서비스를 준비하고 있습니다.</p><div><span>안전화</span><span>안전모</span><span>보호안경</span><span>방진마스크</span><span>보호장갑</span></div></section>
+        </div>
+        <section id="home-about" class="portal-about" tabindex="-1"><strong>ABOUT HSSO</strong><p>반복적인 안전보건 실무를 줄이고, 현장에 더 가까운 업무 환경을 만듭니다.</p></section>
+      </div>
+    </section>
+    <nav class="portal-page-controls" aria-label="홈 화면 전환">
+      <button id="portal-page-up" type="button" aria-label="이전 포털 화면" disabled><span aria-hidden="true">↑</span></button>
+      <span id="portal-page-indicator" aria-live="polite">1 / 2</span>
+      <button id="portal-page-down" type="button" aria-label="다음 포털 화면"><span aria-hidden="true">↓</span></button>
+    </nav>
   </main>
 
   <main id="maker" hidden>
@@ -638,5 +647,6 @@
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script type="module" src="script.js"></script>
+  <script type="module" src="assets/home/home-dashboard.js"></script>
 </body>
 </html>
