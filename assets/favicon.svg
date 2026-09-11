@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="HSSO 안전보건 방패">
+  <path fill="#078675" d="M32 2 57 11v18c0 15.6-9.7 26.6-25 33C16.7 55.6 7 44.6 7 29V11L32 2Z"/>
+  <path fill="#fff" d="M17 31v-3h3c.7-7.1 5.1-12.2 11-13v9h3v-9c5.9.8 10.3 5.9 11 13h3v3H17Zm5 3h20v4H22v-4Z"/>
+  <path fill="#fff" d="M29 43h6v5h5v6h-5v5h-6v-5h-5v-6h5v-5Z"/>
+</svg>
