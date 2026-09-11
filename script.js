@@ -2931,6 +2931,7 @@ window.addEventListener('popstate', () => {
 });
 
 function scrollToHomeSection(id) {
+  if (window.matchMedia('(min-width: 1001px)').matches) return;
   const section = document.getElementById(id);
   section.focus({ preventScroll: true });
   section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });

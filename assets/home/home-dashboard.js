@@ -16,40 +16,81 @@ const portalIndicator = document.querySelector('#portal-page-indicator');
 const portalDesktop = window.matchMedia('(min-width: 1001px)');
 let portalPage = 0;
 let portalTransitionLocked = false;
+let portalResetSequence = 0;
 
-function setPortalPage(nextPage, { focus = false } = {}) {
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
+function setPortalPage(nextPage, { focus = false, force = false, animate = true } = {}) {
   if (!portalDesktop.matches) return;
   const page = Math.max(0, Math.min(1, nextPage));
-  if (page === portalPage || portalTransitionLocked) return;
-  portalTransitionLocked = true;
+  if (!force && (page === portalPage || portalTransitionLocked)) return;
+  portalTransitionLocked = animate;
   portalPage = page;
+  home.classList.toggle('portal-resetting', !animate);
   home.classList.toggle('portal-page-two', page === 1);
+  home.dataset.portalPage = String(page);
   portalUp.disabled = page === 0;
   portalDown.disabled = page === 1;
   portalIndicator.textContent = `${page + 1} / 2`;
-  portalPanels.forEach((panel, index) => { panel.inert = index !== page; panel.setAttribute('aria-hidden', String(index !== page)); });
+  portalPanels.forEach((panel, index) => {
+    panel.classList.toggle('is-active', index === page);
+    panel.inert = index !== page;
+    panel.setAttribute('aria-hidden', String(index !== page));
+  });
   if (focus) (page ? portalUp : portalDown).focus({ preventScroll: true });
-  setTimeout(() => { portalTransitionLocked = false; }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 20 : 620);
+  if (animate) setTimeout(() => { portalTransitionLocked = false; }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 20 : 620);
+  else requestAnimationFrame(() => requestAnimationFrame(() => home.classList.remove('portal-resetting')));
 }
 
 function resetPortalMode() {
   if (portalDesktop.matches) {
-    portalPanels.forEach((panel, index) => { panel.inert = index !== portalPage; panel.setAttribute('aria-hidden', String(index !== portalPage)); });
+    home.classList.toggle('portal-page-two', portalPage === 1);
+    portalTransitionLocked = false;
+    portalPanels.forEach((panel, index) => {
+      panel.classList.toggle('is-active', index === portalPage);
+      panel.inert = index !== portalPage;
+      panel.setAttribute('aria-hidden', String(index !== portalPage));
+    });
   } else {
     home.classList.remove('portal-page-two');
     portalPage = 0;
     portalTransitionLocked = false;
-    portalPanels.forEach(panel => { panel.inert = false; panel.removeAttribute('aria-hidden'); });
+    portalPanels.forEach(panel => { panel.classList.add('is-active'); panel.inert = false; panel.removeAttribute('aria-hidden'); });
   }
   portalUp.disabled = portalPage === 0;
   portalDown.disabled = portalPage === 1;
   portalIndicator.textContent = `${portalPage + 1} / 2`;
 }
 
+function resetPortalToFirstPage() {
+  const sequence = ++portalResetSequence;
+  if (['#home-tools', '#home-about', '#home'].includes(window.location.hash)) history.replaceState({ viewName: 'home' }, '', `${window.location.pathname}${window.location.search}`);
+  setPortalPage(0, { force: true, animate: false });
+  const previousScrollBehavior = document.documentElement.style.scrollBehavior;
+  document.documentElement.style.scrollBehavior = 'auto';
+  const resetScroll = () => {
+    if (sequence !== portalResetSequence) return;
+    home.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  };
+  resetScroll();
+  requestAnimationFrame(resetScroll);
+  setTimeout(resetScroll, 0);
+  setTimeout(resetScroll, 100);
+  setTimeout(() => {
+    if (sequence === portalResetSequence) document.documentElement.style.scrollBehavior = previousScrollBehavior;
+  }, 150);
+}
+
 portalUp.addEventListener('click', () => setPortalPage(0, { focus: true }));
 portalDown.addEventListener('click', () => setPortalPage(1, { focus: true }));
 portalDesktop.addEventListener('change', resetPortalMode);
-resetPortalMode();
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', resetPortalToFirstPage, { once: true });
+else resetPortalToFirstPage();
+window.addEventListener('load', resetPortalToFirstPage, { once: true });
+window.addEventListener('pageshow', resetPortalToFirstPage);
 
 document.addEventListener('click', event => {
   if (!portalDesktop.matches) return;
