@@ -1,4 +1,9 @@
 /* HSSO home portal. Kept separate from tool, form, preview and print styles. */
+.header-brand { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.header-home-link { display: inline-flex; align-items: center; min-height: 44px; color: #173248; font-size: 22px; font-weight: 800; letter-spacing: -.6px; line-height: 1; text-decoration: none; }
+.header-home-link:hover { color: #087f83; }
+.site-header .header-home-link:focus-visible { outline: 2px solid #087f83; outline-offset: 3px; border-radius: 2px; }
+body:has(#home:not([hidden])) .header-home-link { display: none; }
 .portal-menu-button { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; padding: 0; border: 1px solid #d4dee2; border-radius: 3px; background: #fff; }
 .portal-menu-button span, .portal-menu-button span::before, .portal-menu-button span::after { display: block; width: 19px; height: 2px; background: #173248; content: ""; }
 .portal-menu-button span { position: relative; }
