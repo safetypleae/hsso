@@ -31,6 +31,15 @@
 .board-form input, .board-form textarea { width: 100%; min-width: 0; padding: 11px 13px; border: 1px solid #cbd6da; border-radius: 4px; background: #fff; font: inherit; font-weight: 400; }
 .board-form textarea { min-height: 300px; resize: vertical; }
 .board-page :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.board-admin-badge { display: inline-block; margin-top: 8px; padding: 2px 7px; color: #17645a; background: #edf5f3; border-radius: 3px; font-size: 12px; font-weight: 700; }
+.board-heading-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.board-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; font-size: 14px; }
+.board-filter select { min-height: 44px; padding: 8px; border: 1px solid #cad6db; background: #fff; color: var(--navy); }
+.board-answer { margin-bottom: 24px; padding: 20px; border-left: 3px solid var(--green); background: #f5f9f8; }
+.board-answer h2 { font-size: 18px; }
+.board-answer-content { white-space: pre-wrap; overflow-wrap: anywhere; }
+.board-answer-form { margin-bottom: 24px; }
+.board-answer-form textarea { min-height: 160px; }
 @media (max-width: 760px) {
   .board-page { grid-template-columns: minmax(0,1fr); gap: 22px; padding-block: 24px 50px; }
   .board-sidebar { padding: 0 0 15px; border-right: 0; border-bottom: 1px solid var(--line); }

@@ -15,12 +15,14 @@ import { onRequest as signup } from '../functions/api/auth/signup.js';
 import { onRequest as login } from '../functions/api/auth/login.js';
 import { onRequest as logout } from '../functions/api/auth/logout.js';
 import { onRequest as me } from '../functions/api/auth/me.js';
+import { surveyCollection } from '../server/risk-surveys.js';
 
 const browserPath=process.env.HSSO_BROWSER;
 test('local browser: protected dashboard, documents, adapters and responsive navigation', {skip:!browserPath,timeout:60000}, async t=>{
   await access(browserPath);
   const db=createTestDB();t.after(()=>db.close());
   db.sqlite.exec(await readFile(new URL('../migrations/0002_saved_documents.sql',import.meta.url),'utf8'));
+  db.sqlite.exec(await readFile(new URL('../migrations/0003_risk_assessment.sql',import.meta.url),'utf8'));
   // URL paths may contain Korean or spaces; use fileURLToPath for the actual filesystem root.
   const {fileURLToPath}=await import('node:url');const project=fileURLToPath(new URL('..',import.meta.url));
   let base;let failDocuments=false;
@@ -30,7 +32,7 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
       if(url.pathname.startsWith('/api/')) {
         const chunks=[];for await(const chunk of req)chunks.push(chunk);
         const request=new Request(url,{method:req.method,headers:req.headers,...(['GET','HEAD'].includes(req.method)?{}:{body:Buffer.concat(chunks)})});
-        const handlers={'/api/auth/signup':signup,'/api/auth/login':login,'/api/auth/logout':logout,'/api/auth/me':me,'/api/documents':collection};
+        const handlers={'/api/auth/signup':signup,'/api/auth/login':login,'/api/auth/logout':logout,'/api/auth/me':me,'/api/documents':collection,'/api/risk-surveys':surveyCollection};
         const handler=handlers[url.pathname] || (url.pathname.startsWith('/api/documents/')?item:null);
         if(!handler){res.writeHead(404).end();return;}
         const response=failDocuments&&url.pathname==='/api/documents'?Response.json({ok:false,error:'INTERNAL_SERVER_ERROR'},{status:500}):await handler({request,env:{DB:db},params:{id:url.pathname.split('/')[3]}});
@@ -84,7 +86,7 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
     for(const [section,text] of [['profile','browser@example.com'],['documents','저장된 문서가 없습니다.'],['risk','아직 저장된 위험성평가가 없습니다.']]){
       await click(`[data-my-section="${section}"]`);await ready();assert((await evaluate(`document.querySelector('#my-content').textContent`)).includes(text));assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`),true,`${section} overflow ${width}`);
     }
-    await evaluate(`[...document.querySelectorAll('#my-content button')].find(b=>b.textContent==='위험성평가 만들기').click()`);assert.equal(await evaluate(`location.hash`),'#risk-survey-create');
+    await evaluate(`[...document.querySelectorAll('#my-content button')].find(b=>b.textContent==='+ 새 설문 만들기').click()`);assert.equal(await evaluate(`location.hash`),'#risk-survey-create');
     await click('.logo');assert.equal(await evaluate(`document.querySelector('#home').hidden`),false);
     if(width<=900)await click('.menu-button');await click('#msds-menu-button');assert.equal(await evaluate(`document.querySelector('#msds-menu').hidden`),false);
     await click('[data-view-link="risk-assessment"]');assert.equal(await evaluate(`document.querySelector('#risk-assessment').hidden`),false);
@@ -172,7 +174,7 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
   await evaluate(`[...document.querySelectorAll('.my-document-row button')].find(b=>b.textContent==='삭제').click()`);assert.equal(await evaluate(`document.activeElement.id`),'my-delete-cancel');
   await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await wait(`!document.querySelector('#my-delete-dialog').open`);
   assert.equal(db.sqlite.prepare('SELECT count(*) AS n FROM saved_documents').get().n,2);
-  await evaluate(`[...document.querySelectorAll('.my-document-row button')].find(b=>b.textContent==='삭제').click()`);await click('#my-delete-confirm');await ready();assert.equal(db.sqlite.prepare('SELECT count(*) AS n FROM saved_documents').get().n,1);
+  await evaluate(`[...document.querySelectorAll('.my-document-row button')].find(b=>b.textContent==='삭제').click()`);await click('#my-delete-confirm');await wait(`!document.querySelector('#my-delete-dialog').open`);await ready();assert.equal(db.sqlite.prepare('SELECT count(*) AS n FROM saved_documents').get().n,1);
   // The original tools still use their default PDF entry points and their own data.
   await evaluate('window.__savedRestoreMode=false');
   await click('[data-view-link="maker"]');

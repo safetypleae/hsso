@@ -109,7 +109,7 @@ test('/me joins valid session to user and never exposes hashes, tokens or passwo
   const authenticated = await loggedIn(db);
   const result = await call(me,db,{cookie:'other=value; '+authenticated.cookie});
   assert.equal(result.response.status,200);
-  assert.deepEqual(result.data,authenticated.data);
+  assert.deepEqual(result.data,{...authenticated.data,role:'user'});
   assert.equal(result.cookie,undefined);
   for (const privateValue of [sample.password,authenticated.cookie.split('=')[1],db.sqlite.prepare('SELECT password_hash FROM users').get().password_hash]) assert(!JSON.stringify(result.data).includes(privateValue));
 });

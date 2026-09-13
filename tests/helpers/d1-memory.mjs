@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
 
 // Disposable in-memory D1 adapter. No files, Cloudflare connection, or Production writes.
 export function createTestDB() {
@@ -16,6 +17,7 @@ export function createTestDB() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
+  sqlite.exec(readFileSync(new URL('../../migrations/0006_admin_roles.sql', import.meta.url), 'utf8'));
   const calls = [];
   return {
     sqlite, calls, fail: false,
@@ -35,6 +37,18 @@ export function createTestDB() {
           };
         }
       };
+    },
+    async batch(statements) {
+      sqlite.exec('BEGIN');
+      try {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        sqlite.exec('COMMIT');
+        return results;
+      } catch (error) {
+        sqlite.exec('ROLLBACK');
+        throw error;
+      }
     },
     close() { sqlite.close(); }
   };
