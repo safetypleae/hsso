@@ -18,6 +18,7 @@ export function createTestDB() {
     );
   `);
   sqlite.exec(readFileSync(new URL('../../migrations/0006_admin_roles.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../../migrations/0008_email_verifications.sql', import.meta.url), 'utf8'));
   const calls = [];
   return {
     sqlite, calls, fail: false,

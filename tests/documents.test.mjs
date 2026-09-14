@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createTestDB } from './helpers/d1-memory.mjs';
+import { seedEmailProof } from './helpers/email-proof.mjs';
 import { collection, item, MAX_BODY_BYTES } from '../server/documents.js';
 import { onRequest as signup } from '../functions/api/auth/signup.js';
 import { onRequest as login } from '../functions/api/auth/login.js';
@@ -25,6 +26,7 @@ async function fixture(t) {
   for(const email of ['one@example.com','two@example.com']) {
     const body={email,password:'fixture password1',name:'테스트',companyName:'회사',departmentName:'부서',position:'직급'};
     const request=()=>new Request(origin+'/api/auth/test',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    body.emailVerificationProof = await seedEmailProof(db, body.email);
     assert.equal((await signup({request:request(),env:{DB:db}})).status,201);
     const response=await login({request:request(),env:{DB:db}});const user=(await response.json()).user;
     accounts.push({id:user.id,cookie:response.headers.get('set-cookie').split(';')[0]});

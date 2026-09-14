@@ -1,4 +1,5 @@
 import { isValidSignupPassword } from '../../../password-policy.js';
+import { hashVerificationProof } from '../../../server/email-verification.js';
 
 // Workers' reported native PBKDF2 cap is 100,000, below OWASP's 600,000
 // SHA-256 recommendation. Revisit when the runtime limit changes:
@@ -90,13 +91,36 @@ export async function onRequest(context) {
     const existing = await db.prepare('SELECT id FROM users WHERE email = ? LIMIT 1').bind(values.email).first();
     if (existing) return failure('EMAIL_ALREADY_EXISTS', 409);
 
+    const proofHash = await hashVerificationProof(input.emailVerificationProof);
+    if (!proofHash) return failure('EMAIL_VERIFICATION_REQUIRED', 400);
+    // Reject invalid proof before expensive password hashing; the batch rechecks for races.
+    const verified = await db.prepare(`SELECT id FROM email_verifications
+      WHERE email = ? AND proof_hash = ? AND verified_at IS NOT NULL
+        AND consumed_at IS NULL AND proof_expires_at > ?
+        AND sequence = (SELECT MAX(sequence) FROM email_verifications WHERE email = ?)`
+    ).bind(values.email, proofHash, Date.now(), values.email).first();
+    if (!verified) return failure('EMAIL_VERIFICATION_REQUIRED', 400);
+
     const id = crypto.randomUUID();
     const passwordHash = await hashPassword(values.password);
     try {
-      const result = await db.prepare(
-        'INSERT INTO users (id, email, password_hash, name, company_name, department_name, position) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).bind(id, values.email, passwordHash, values.name, values.companyName, values.departmentName, values.position).run();
-      if (!result.success || result.meta?.changes !== 1) return failure('INTERNAL_SERVER_ERROR', 500);
+      const now = Date.now();
+      // D1 batch is transactional: account creation and proof consumption succeed together.
+      const [result, consumed] = await db.batch([
+        db.prepare(`INSERT INTO users (id, email, password_hash, name, company_name, department_name, position)
+          SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
+            SELECT 1 FROM email_verifications WHERE email = ? AND proof_hash = ?
+              AND verified_at IS NOT NULL AND consumed_at IS NULL AND proof_expires_at > ?
+              AND sequence = (SELECT MAX(sequence) FROM email_verifications WHERE email = ?)
+          )`).bind(id, values.email, passwordHash, values.name, values.companyName, values.departmentName, values.position, values.email, proofHash, now, values.email),
+        db.prepare(`UPDATE email_verifications SET consumed_at = ?
+          WHERE email = ? AND proof_hash = ? AND consumed_at IS NULL
+            AND EXISTS (SELECT 1 FROM users WHERE id = ? AND email = ?)`
+        ).bind(now, values.email, proofHash, id, values.email)
+      ]);
+      if (!result.success || !consumed.success) return failure('INTERNAL_SERVER_ERROR', 500);
+      if (result.meta?.changes !== 1) return failure('EMAIL_VERIFICATION_REQUIRED', 400);
+      if (consumed.meta?.changes !== 1) return failure('INTERNAL_SERVER_ERROR', 500);
     } catch (error) {
       if (isDuplicateEmail(error)) return failure('EMAIL_ALREADY_EXISTS', 409);
       return failure('INTERNAL_SERVER_ERROR', 500);

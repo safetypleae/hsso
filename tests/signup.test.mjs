@@ -9,19 +9,28 @@ const payload = {
   companyName: ' HSSO ', departmentName: ' 안전팀 ', position: ' 담당자 '
 };
 const selectSql = 'SELECT id FROM users WHERE email = ? LIMIT 1';
-const insertSql = 'INSERT INTO users (id, email, password_hash, name, company_name, department_name, position) VALUES (?, ?, ?, ?, ?, ?, ?)';
+const insertSql = `INSERT INTO users (id, email, password_hash, name, company_name, department_name, position)
+          SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
+            SELECT 1 FROM email_verifications WHERE email = ? AND proof_hash = ?
+              AND verified_at IS NOT NULL AND consumed_at IS NULL AND proof_expires_at > ?
+              AND sequence = (SELECT MAX(sequence) FROM email_verifications WHERE email = ?)
+          )`;
 
 function mockDb({ existing = false, selectError, insertError, insertResult } = {}) {
   const rows = new Map();
   const calls = [];
   return {
     rows, calls,
+    async batch(statements) { return Promise.all(statements.map(statement => statement.run())); },
     prepare(sql) {
+      // This unit mock assumes a valid proof; actual SQL/proof semantics use SQLite in email-verification.test.mjs.
+      if (sql.startsWith('SELECT id FROM email_verifications')) return { bind: () => ({ first: async () => ({ id: 'verified-fixture' }) }) };
+      if (sql.startsWith('UPDATE email_verifications SET consumed_at')) return { bind: () => ({ run: async () => ({ success: true, meta: { changes: 1 } }) }) };
       assert([selectSql, insertSql].includes(sql), 'SQL must remain static and parameterized');
       return {
         bind(...args) {
           calls.push({ sql, args });
-          assert.equal(args.length, sql === selectSql ? 1 : 7);
+          assert.equal(args.length, sql === selectSql ? 1 : 11);
           return {
             async first() {
               assert.equal(sql, selectSql);
@@ -50,7 +59,7 @@ async function call(input = payload, { db = mockDb(), method = 'POST', origin = 
   if (contentType !== null) headers['Content-Type'] = contentType;
   const request = new Request(url, {
     method, headers,
-    ...(method === 'GET' || method === 'HEAD' ? {} : { body: raw === undefined ? JSON.stringify(input) : raw })
+    ...(method === 'GET' || method === 'HEAD' ? {} : { body: raw === undefined ? JSON.stringify(input && typeof input === 'object' && !Array.isArray(input) ? { emailVerificationProof: 'a'.repeat(64), ...input } : input) : raw })
   });
   const response = await onRequest({ request, env: { DB: db } });
   assert.match(response.headers.get('content-type'), /^application\/json/);
@@ -174,13 +183,17 @@ test('DB failures never expose internal details or become unrelated duplicate er
     null, mockDb({ selectError: privateError }), mockDb({ insertError: privateError }),
     mockDb({ insertError: new Error('UNIQUE constraint failed: users.id') }),
     mockDb({ insertError: new Error('UNIQUE constraint failed: users.email_other') }),
-    mockDb({ insertResult: { success: false } }), mockDb({ insertResult: { success: true, meta: { changes: 0 } } })
+    mockDb({ insertResult: { success: false } })
   ];
   for (const db of cases) {
     const { response, body } = await call(payload, { db });
     assert.equal(response.status, 500);
     assert.deepEqual(body, { ok: false, error: 'INTERNAL_SERVER_ERROR' });
   }
+  // A zero-row conditional insert means the proof expired or was consumed after its precheck.
+  const stale = await call(payload, { db: mockDb({ insertResult: { success: true, meta: { changes: 0 } } }) });
+  assert.equal(stale.response.status, 400);
+  assert.deepEqual(stale.body, { ok: false, error: 'EMAIL_VERIFICATION_REQUIRED' });
 });
 
 test('Web Crypto failure returns generic 500 without attempting INSERT', async () => {

@@ -11,6 +11,8 @@ import { join, resolve, dirname, basename, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createTestDB } from './helpers/d1-memory.mjs';
+import { seedEmailProof } from './helpers/email-proof.mjs';
+import { requestEmailCode, verifyEmailCode } from '../server/email-verification.js';
 import { collection, item } from '../server/documents.js';
 import { onRequest as signup } from '../functions/api/auth/signup.js';
 import { onRequest as login } from '../functions/api/auth/login.js';
@@ -27,21 +29,24 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
   // URL paths may contain Korean or spaces; use fileURLToPath for the actual filesystem root.
   const {fileURLToPath}=await import('node:url');const project=fileURLToPath(new URL('..',import.meta.url));
   let base;let failDocuments=false;
+  const verificationEnv = { DB: db, RESEND_API_KEY: 'test-placeholder', EMAIL_FROM: 'fixture@example.test', EMAIL_VERIFICATION_SECRET: 'public-test-placeholder-not-a-real-secret' };
+  const sentCodes = [];
+  const sendCode = context => requestEmailCode(context, async (_, mail) => { sentCodes.push(mail); });
   const server=createServer(async(req,res)=>{
     try {
       const url=new URL(req.url,base);
       if(url.pathname.startsWith('/api/')) {
         const chunks=[];for await(const chunk of req)chunks.push(chunk);
         const request=new Request(url,{method:req.method,headers:req.headers,...(['GET','HEAD'].includes(req.method)?{}:{body:Buffer.concat(chunks)})});
-        const handlers={'/api/auth/profile':updateProfile,'/api/auth/signup':signup,'/api/auth/login':login,'/api/auth/logout':logout,'/api/auth/me':me,'/api/documents':collection,'/api/risk-surveys':surveyCollection};
+        const handlers={'/api/auth/email-code':sendCode,'/api/auth/verify-email':verifyEmailCode,'/api/auth/profile':updateProfile,'/api/auth/signup':signup,'/api/auth/login':login,'/api/auth/logout':logout,'/api/auth/me':me,'/api/documents':collection,'/api/risk-surveys':surveyCollection};
         const handler=handlers[url.pathname] || (url.pathname.startsWith('/api/documents/')?item:null);
         if(!handler){res.writeHead(404).end();return;}
-        const response=failDocuments&&url.pathname==='/api/documents'?Response.json({ok:false,error:'INTERNAL_SERVER_ERROR'},{status:500}):await handler({request,env:{DB:db},params:{id:url.pathname.split('/')[3]}});
+        const response=failDocuments&&url.pathname==='/api/documents'?Response.json({ok:false,error:'INTERNAL_SERVER_ERROR'},{status:500}):await handler({request,env:verificationEnv,params:{id:url.pathname.split('/')[3]}});
         res.writeHead(response.status,Object.fromEntries(response.headers));res.end(await response.text());return;
       }
       if(url.pathname==='/pdf-stub.js'){res.writeHead(200,{'Content-Type':'text/javascript'}).end('export const GlobalWorkerOptions = {};');return;}
       const relative=url.pathname==='/'?'index.html':decodeURIComponent(url.pathname.slice(1));
-      if(!['index.html','script.js','auth.js','password-policy.js','mypage.js','saved-document-preview.js','style.css','mypage.css'].includes(relative)&&!/^assets\/[a-z0-9/.-]+$/i.test(relative)){res.writeHead(404).end();return;}
+      if(!['index.html','script.js','auth.js','email-verification-ui.js','password-policy.js','mypage.js','saved-document-preview.js','style.css','mypage.css'].includes(relative)&&!/^assets\/[a-z0-9/.-]+$/i.test(relative)){res.writeHead(404).end();return;}
       let content=await readFile(join(project,relative));
       if(relative==='index.html')content=content.toString().replace(/<script src="https:[^"]+"><\/script>/g,'');
       if(relative==='script.js') {
@@ -96,11 +101,44 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
   assert.equal(await evaluate("document.querySelector('#signup-password-confirm-error').hidden"),false);
   assert.equal(await evaluate('window.__signupCalls'),0);
   await evaluate("document.querySelector('#signup-password-confirm').value='abc12345';document.querySelector('#signup-form').requestSubmit()");
+  assert.equal(await evaluate('window.__signupCalls'),0);
+  assert.equal(await evaluate("document.querySelector('#signup-submit').disabled"),true);
+  await click('#signup-send-code');
+  await wait("!document.querySelector('#signup-code-area').hidden");
+  assert.equal(sentCodes.length,1);
+  assert.equal(await evaluate("document.querySelector('#signup-send-code').disabled"),true);
+  await evaluate(`document.querySelector('#signup-code').value=${JSON.stringify('000000' === sentCodes[0].code ? '000001' : '000000')}`);
+  await click('#signup-verify-code');
+  await wait("document.querySelector('#signup-verification-message').textContent.includes('올바르지')");
+  await evaluate(`document.querySelector('#signup-code').value=${JSON.stringify(sentCodes[0].code)}`);
+  await click('#signup-verify-code');
+  await wait("!document.querySelector('#signup-submit').disabled");
+  assert.equal(await evaluate("document.querySelector('#signup-verification-message').textContent.includes('인증이 완료')"),true);
+  // Changing the email immediately invalidates proof, including changing back.
+  await evaluate("document.querySelector('#signup-email').value='changed@example.com';document.querySelector('#signup-email').dispatchEvent(new Event('input',{bubbles:true}))");
+  assert.equal(await evaluate("document.querySelector('#signup-submit').disabled"),true);
+  assert.equal(await evaluate("document.querySelector('#signup-code-area').hidden"),true);
+  await evaluate("document.querySelector('#signup-email').value='ui@example.com';document.querySelector('#signup-email').dispatchEvent(new Event('input',{bubbles:true}))");
+  assert.equal(await evaluate("document.querySelector('#signup-submit').disabled"),true);
+  await click('#signup-send-code');
+  await wait("document.querySelector('#signup-verification-message').textContent.includes('잠시 후')");
+  // Advance the server resend fixture and the UI clock; no actual 60-second wait.
+  db.sqlite.exec('UPDATE email_verifications SET resend_available_at = 0');
+  await evaluate("window.__realDateNow=Date.now;Date.now=()=>window.__realDateNow()+61000");
+  await wait("!document.querySelector('#signup-send-code').disabled");
+  await click('#signup-send-code');
+  await wait("!document.querySelector('#signup-code-area').hidden");
+  assert.equal(sentCodes.length,2);
+  await evaluate(`document.querySelector('#signup-code').value=${JSON.stringify(sentCodes[1].code)}`);
+  await click('#signup-verify-code');
+  await wait("!document.querySelector('#signup-submit').disabled");
+  await evaluate("document.querySelector('#signup-form').requestSubmit()");
   await wait("location.hash === '#login'");
   assert.equal(await evaluate('window.__signupCalls'),1);
   assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM users WHERE email='ui@example.com'").get().n,1);
   assert.deepEqual(await evaluate("[...document.querySelectorAll('.auth-password-conditions li')].map(e=>e.textContent)"),['○ 8자 이상','○ 영문 포함','○ 숫자 포함']);
   const fixture={email:'browser@example.com',password:'browser fixture password1',name:'검증 사용자',companyName:'검증 회사',departmentName:'검증 부서',position:'담당자'};
+  fixture.emailVerificationProof = await seedEmailProof(db, fixture.email);
   const request=()=>new Request(base+'/api/auth/signup',{method:'POST',headers:{'Content-Type':'application/json',Origin:base},body:JSON.stringify(fixture)});
   assert.equal((await signup({request:request(),env:{DB:db}})).status,201);
   const auth=await login({request:request(),env:{DB:db}});const cookie=auth.headers.get('set-cookie').split(';')[0].split('=');

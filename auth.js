@@ -1,4 +1,5 @@
 import { passwordConditions, isValidSignupPassword, PASSWORD_POLICY_MESSAGE, PASSWORD_MAX_LENGTH } from './password-policy.js';
+import { initEmailVerification } from './email-verification-ui.js';
 
 // Account forms only. Navigation stays in the existing application view switcher.
 const SIGNUP_ENDPOINT = '/api/auth/signup';
@@ -16,12 +17,13 @@ export function initAuthUI(navigate) {
   const headerLogin = document.querySelector('#header-login');
   const headerSession = document.querySelector('#header-session');
   const logoutButton = document.querySelector('#header-logout');
-  const fields = [...signupForm.querySelectorAll('input')];
+  const fields = [...signupForm.querySelectorAll('input')].filter(input => Object.hasOwn(LIMITS, input.name));
   let submitting = false;
   let loggingIn = false;
   let loggingOut = false;
   let sessionVersion = 0;
   let currentView;
+  const emailVerification = initEmailVerification(signupForm, signupButton, () => submitting);
 
   function renderSession(authenticated) {
     headerLogin.hidden = authenticated;
@@ -200,11 +202,19 @@ export function initAuthUI(navigate) {
     }
 
     // Explicit allowlist: confirmation and any extra form fields never reach the API.
+    const emailVerificationProof = emailVerification.getProof();
+    if (!emailVerificationProof) {
+      showMessage(signupMessage, '이메일 인증을 먼저 완료해주세요.');
+      emailVerification.render();
+      return;
+    }
     const payload = {
+      emailVerificationProof,
       email: values.email.toLowerCase(), password: values.password, name: values.name,
       companyName: values.companyName, departmentName: values.departmentName, position: values.position
     };
     submitting = true;
+    emailVerification.render();
     signupButton.disabled = true;
     signupButton.textContent = '처리 중...';
     signupForm.setAttribute('aria-busy', 'true');
@@ -226,6 +236,10 @@ export function initAuthUI(navigate) {
         let message = SERVER_ERROR;
         if (response.status === 409 && result?.error === 'EMAIL_ALREADY_EXISTS') message = '이미 가입된 이메일입니다.';
         else if (response.status === 400 && result?.error === 'INVALID_PASSWORD') message = PASSWORD_POLICY_MESSAGE;
+        else if (result?.error === 'EMAIL_VERIFICATION_REQUIRED') {
+          message = '이메일 인증이 필요하거나 만료되었습니다. 다시 인증해주세요.';
+          emailVerification.reset(message);
+        }
         else if (response.status === 400) message = '입력한 정보를 다시 확인해주세요.';
         else if (response.status === 403) message = '요청을 처리할 수 없습니다.';
         showMessage(signupMessage, message);
@@ -234,7 +248,7 @@ export function initAuthUI(navigate) {
       showMessage(signupMessage, '네트워크 연결을 확인한 후 다시 시도해주세요.');
     } finally {
       submitting = false;
-      signupButton.disabled = false;
+      emailVerification.render();
       signupButton.textContent = '회원가입';
       signupForm.removeAttribute('aria-busy');
       fields.forEach(input => { input.disabled = false; });
@@ -242,7 +256,7 @@ export function initAuthUI(navigate) {
   });
 
   document.querySelector('#login-submit').disabled = false;
-  signupButton.disabled = false;
+  emailVerification.render();
   window.addEventListener('pagehide', clearPasswords);
   refreshSession();
   // Recheck after returning from the browser back/forward cache or another tab.

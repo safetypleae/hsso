@@ -624,6 +624,16 @@
           <div class="auth-field"><label for="signup-department">부서명</label><input id="signup-department" name="departmentName" type="text" required aria-describedby="signup-department-error"><span id="signup-department-error" class="auth-field-error" hidden></span></div>
           <div class="auth-field"><label for="signup-position">직급</label><input id="signup-position" name="position" type="text" autocomplete="organization-title" required aria-describedby="signup-position-error"><span id="signup-position-error" class="auth-field-error" hidden></span></div>
           <div class="auth-field"><label for="signup-email">이메일</label><input id="signup-email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" required aria-describedby="signup-email-error"><span id="signup-email-error" class="auth-field-error" hidden></span></div>
+          <div class="auth-field" id="signup-email-verification">
+            <button id="signup-send-code" class="auth-submit" type="button">인증번호 받기</button>
+            <div id="signup-code-area" class="auth-field" hidden>
+              <label for="signup-code">이메일 인증번호</label>
+              <input id="signup-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" aria-describedby="signup-verification-message signup-verification-timer">
+              <button id="signup-verify-code" class="auth-submit" type="button" disabled>인증 확인</button>
+            </div>
+            <span id="signup-verification-message" class="auth-field-help" role="status" aria-live="polite">이메일 인증 후 회원가입을 완료할 수 있습니다.</span>
+            <span id="signup-verification-timer" class="auth-field-help" role="timer" aria-live="off"></span>
+          </div>
           <div class="auth-field"><label for="signup-password">비밀번호</label><input id="signup-password" name="password" type="password" autocomplete="new-password" required aria-describedby="signup-password-help signup-password-conditions signup-password-error"><span id="signup-password-help" class="auth-field-help">비밀번호는 8~128자이며 영문과 숫자를 포함해야 합니다.</span><div id="signup-password-conditions" class="auth-field-help"><span>비밀번호 조건</span><ul class="auth-password-conditions"><li id="signup-password-length">○ 8자 이상</li><li id="signup-password-letter">○ 영문 포함</li><li id="signup-password-digit">○ 숫자 포함</li></ul></div><span id="signup-password-error" class="auth-field-error" hidden></span></div>
           <div class="auth-field"><label for="signup-password-confirm">비밀번호 확인</label><input id="signup-password-confirm" name="passwordConfirm" type="password" autocomplete="new-password" required aria-describedby="signup-password-confirm-error"><span id="signup-password-confirm-error" class="auth-field-error" hidden></span></div>
           <p id="signup-message" class="auth-message" role="alert" tabindex="-1" hidden></p>

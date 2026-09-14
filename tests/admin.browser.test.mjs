@@ -47,7 +47,7 @@ test('Chrome admin notice CRUD, inquiry answers, ordinary-user controls and resp
       }
       if(p==='/pdf-stub.js'){res.writeHead(200,{'Content-Type':'text/javascript'}).end('export const GlobalWorkerOptions = {};');return;}
       const relative=p==='/'?'index.html':decodeURIComponent(p.slice(1));
-      if(!['index.html','script.js','auth.js','password-policy.js','mypage.js','saved-document-preview.js','style.css','mypage.css'].includes(relative)&&!/^assets\/[a-z0-9/.-]+$/i.test(relative)){res.writeHead(404).end();return;}
+      if(!['index.html','script.js','auth.js','email-verification-ui.js','password-policy.js','mypage.js','saved-document-preview.js','style.css','mypage.css'].includes(relative)&&!/^assets\/[a-z0-9/.-]+$/i.test(relative)){res.writeHead(404).end();return;}
       let content=await readFile(join(project,relative));
       if(relative==='index.html')content=content.toString().replace(/<script src="https:[^"]+"><\/script>/g,'');
       if(relative==='script.js')content=content.toString().replace('https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.mjs','/pdf-stub.js');

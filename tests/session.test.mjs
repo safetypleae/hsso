@@ -7,6 +7,7 @@ import { onRequest as me } from '../functions/api/auth/me.js';
 import { onRequest as logout } from '../functions/api/auth/logout.js';
 import { verifyPassword, SESSION_SECONDS } from '../server/auth-session.js';
 import { createTestDB } from './helpers/d1-memory.mjs';
+import { seedEmailProof } from './helpers/email-proof.mjs';
 
 const sample = { email: 'tester@example.com', password: '  test password1  ', name: '테스트', companyName: '예시 회사', departmentName: '예시 부서', position: '담당자' };
 const origin = 'https://hsso.pages.dev';
@@ -26,7 +27,7 @@ async function call(handler, db, { method = handler === me ? 'GET' : 'POST', bod
 async function fixture(t) {
   const db = createTestDB();
   t.after(() => db.close());
-  const result = await call(signup, db, { body: sample });
+  const result = await call(signup, db, { body: { ...sample, emailVerificationProof: await seedEmailProof(db, sample.email) } });
   assert.equal(result.response.status, 201);
   return db;
 }
