@@ -28,7 +28,7 @@ function bodyError(error) {
 }
 
 function postView(row, viewerId = null, admin = false) {
-  return { id: row.id, boardType: row.boardType, title: row.title, ...(row.content === undefined ? {} : { content: row.content }), authorName: row.authorName || '탈퇴한 사용자', ...(row.content === undefined ? {} : { canEdit: row.boardType === 'notice' ? admin : viewerId === row.authorUserId, canDelete: row.boardType === 'notice' && admin }), viewCount: Number(row.viewCount), createdAt: row.createdAt, updatedAt: row.updatedAt };
+  return { id: row.id, boardType: row.boardType, title: row.title, ...(row.content === undefined ? {} : { content: row.content }), authorName: row.authorName || '탈퇴한 사용자', ...(row.content === undefined ? {} : { canEdit: row.boardType === 'notice' ? admin : viewerId === row.authorUserId, canDelete: row.boardType === 'notice' ? admin : Boolean(viewerId && viewerId === row.authorUserId) }), viewCount: Number(row.viewCount), createdAt: row.createdAt, updatedAt: row.updatedAt };
 }
 
 const SELECT_LIST = 'SELECT p.id,p.board_type AS boardType,p.title,u.name AS authorName,p.view_count AS viewCount,p.created_at AS createdAt,p.updated_at AS updatedAt FROM board_posts p LEFT JOIN users u ON u.id=p.author_user_id';
@@ -74,8 +74,10 @@ export async function boardItem({ request, env, params }) {
       } else if (viewerId) admin = await userRole(env, viewerId) === 'admin';
     }
     if (request.method === 'DELETE') {
-      if (existing.boardType !== 'notice') return errorResponse('FORBIDDEN',403);
-      const result = await env.DB.prepare("DELETE FROM board_posts WHERE id=? AND board_type='notice'").bind(params.id).run();
+      if (existing.boardType === 'free' && existing.authorUserId !== viewerId) return errorResponse('FORBIDDEN',403);
+      const result = existing.boardType === 'notice'
+        ? await env.DB.prepare("DELETE FROM board_posts WHERE id=? AND board_type='notice'").bind(params.id).run()
+        : await env.DB.prepare("DELETE FROM board_posts WHERE id=? AND board_type='free' AND author_user_id=?").bind(params.id,viewerId).run();
       if (!result.success) throw new Error('delete');
       return result.meta?.changes === 1 ? json({ok:true}) : errorResponse('NOT_FOUND',404);
     }

@@ -124,20 +124,31 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
     await cdp('Page.navigate',{url:base+'/#mypage'});await ready();
     await click('[data-my-section="profile"]');await ready();
     assert.equal(await evaluate("document.querySelector('#my-content').textContent.includes('일반 회원')"),true);
-    const beforeName=db.sqlite.prepare('SELECT name FROM users WHERE email=?').get(fixture.email).name;
+    const beforeProfile=db.sqlite.prepare('SELECT name, company_name, department_name, position FROM users WHERE email=?').get(fixture.email);
     await click('#my-profile-edit');
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('.my-profile-form input')].map(e=>e.name)"),['name']);
-    await evaluate("document.querySelector('#my-profile-name').value='취소할 이름'");
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.my-profile-form input')].map(e=>e.name)"),['name','companyName','departmentName','position']);
+    assert.equal(await evaluate("document.querySelector('.my-profile-form').textContent.includes('browser@example.com') && document.querySelector('.my-profile-form').textContent.includes('일반 회원')"),true);
+    await evaluate("document.querySelectorAll('.my-profile-form input').forEach(input=>{input.value='취소할 정보'})");
     await click('#my-profile-cancel');
-    assert.equal(db.sqlite.prepare('SELECT name FROM users WHERE email=?').get(fixture.email).name,beforeName);
+    assert.deepEqual(db.sqlite.prepare('SELECT name, company_name, department_name, position FROM users WHERE email=?').get(fixture.email),beforeProfile);
     await click('#my-profile-edit');
     await evaluate("document.querySelector('#my-profile-name').value=' ';document.querySelector('.my-profile-form').requestSubmit()");
     assert.equal(await evaluate("document.querySelector('#my-profile-error').textContent"),'이름은 1~50자로 입력해주세요.');
     const changed='수정 사용자 '+width;
-    await evaluate(`document.querySelector('#my-profile-name').value=${JSON.stringify(changed)};document.querySelector('.my-profile-form').requestSubmit()`);
+    const changedProfile={name:changed,companyName:'수정 회사 '+width,departmentName:'수정 부서 '+width,position:'수정 직급 '+width};
+    await evaluate(`for(const [key,value] of Object.entries(${JSON.stringify(changedProfile)}))document.querySelector('.my-profile-form').elements[key].value='  '+value+'  '`);
+    for(const [field,value,message] of [['companyName',' ','회사명은 1~100자로 입력해주세요.'],['departmentName','가'.repeat(101),'부서명은 1~100자로 입력해주세요.'],['position','가'.repeat(51),'직급은 1~50자로 입력해주세요.']]) {
+      await evaluate(`document.querySelector('.my-profile-form').elements[${JSON.stringify(field)}].value=${JSON.stringify(value)};document.querySelector('.my-profile-form').requestSubmit()`);
+      assert.equal(await evaluate("document.querySelector('#my-profile-error').textContent"),message);
+      await evaluate(`document.querySelector('.my-profile-form').elements[${JSON.stringify(field)}].value=${JSON.stringify('  '+changedProfile[field]+'  ')}`);
+    }
+    await evaluate("document.querySelector('.my-profile-form').requestSubmit()");
     await wait("document.querySelector('#my-status').textContent==='정보를 저장했습니다.'");
     assert.equal(await evaluate(`document.querySelector('#my-content').textContent.includes(${JSON.stringify(changed)})`),true);
     assert.equal(db.sqlite.prepare('SELECT name FROM users WHERE email=?').get(fixture.email).name,changed);
+    const savedProfile=db.sqlite.prepare('SELECT name, company_name, department_name, position FROM users WHERE email=?').get(fixture.email);
+    assert.deepEqual(Object.values(savedProfile),Object.values(changedProfile));
+    for(const value of Object.values(changedProfile))assert.equal(await evaluate(`document.querySelector('#my-content').textContent.includes(${JSON.stringify(value)})`),true);
     assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
     await click('[data-my-section="dashboard"]');await ready();
     assert.equal(await evaluate(`document.querySelector('#my-content h1').textContent.includes(${JSON.stringify(changed)})`),true);
@@ -207,7 +218,7 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
       getNumberOfPages(){return 1;} addImage(){} save(filename){window.__pdfSaves.push({filename,size:this.size});}
     }};
   `);
-  await click('[data-view-link="mypage"]');await ready();assert.equal(await evaluate(`document.querySelectorAll('.my-document-row').length`),2);
+  await click('[data-view-link="mypage"]');await ready();await wait(`document.querySelectorAll('.my-document-row').length===2`);
   await click('[data-my-section="documents"]');await ready();
   for(const width of [1440,390]) {
     await cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
@@ -261,7 +272,9 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
   await back();await ready();
   await evaluate(`document.querySelector('[name=q]').value='브라우저 경고표지';document.querySelector('.my-filters').requestSubmit()`);await ready();
   await evaluate(`[...document.querySelectorAll('.my-document-row button')].find(b=>b.textContent==='삭제').click()`);assert.equal(await evaluate(`document.activeElement.id`),'my-delete-cancel');
-  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await wait(`!document.querySelector('#my-delete-dialog').open`);
+  // Wait for the asynchronous close event before reopening the same dialog.
+  await evaluate("window.__deleteDialogClosed=false;document.querySelector('#my-delete-dialog').addEventListener('close',()=>{window.__deleteDialogClosed=true},{once:true})");
+  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await wait(`window.__deleteDialogClosed && !document.querySelector('#my-delete-dialog').open`);
   assert.equal(db.sqlite.prepare('SELECT count(*) AS n FROM saved_documents').get().n,2);
   await evaluate(`[...document.querySelectorAll('.my-document-row button')].find(b=>b.textContent==='삭제').click()`);await click('#my-delete-confirm');await wait(`!document.querySelector('#my-delete-dialog').open`);await ready();assert.equal(db.sqlite.prepare('SELECT count(*) AS n FROM saved_documents').get().n,1);
   // The original tools still use their default PDF entry points and their own data.

@@ -91,17 +91,21 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
   function renderProfile(editing = false, notice = '') {
     const version = ++generation;
     clearContent(); status.textContent = notice;
-    heading('내 정보', editing ? '이름을 수정할 수 있습니다. 이메일과 관리자 여부는 변경할 수 없습니다.' : '현재 등록된 회원정보입니다.');
+    heading('내 정보', editing ? '이름, 회사명, 부서명, 직급을 수정할 수 있습니다. 이메일과 관리자 여부는 변경할 수 없습니다.' : '현재 등록된 회원정보입니다.');
     const form = el('form', '', 'my-profile-form'); form.noValidate = true;
     const fields = el('dl', '', 'my-profile');
-    const name = document.createElement('input');
-    name.id = 'my-profile-name'; name.name = 'name'; name.autocomplete = 'name'; name.value = user.name;
-    name.required = true; name.setAttribute('aria-describedby', 'my-profile-error');
+    const limits = { name: 50, companyName: 100, departmentName: 100, position: 50 };
+    const inputs = {};
     for (const [key, label] of Object.entries({ name: '이름', email: '이메일', companyName: '회사명', departmentName: '부서명', position: '직급' })) {
       const term = el('dt', label), value = el('dd', user[key] || '—');
-      if (key === 'name' && editing) {
-        const labelNode = el('label', label); labelNode.htmlFor = name.id;
-        term.replaceChildren(labelNode); value.replaceChildren(name);
+      if (Object.hasOwn(limits, key) && editing) {
+        const input = document.createElement('input');
+        input.id = `my-profile-${key}`; input.name = key; input.value = user[key] || ''; input.required = true;
+        input.autocomplete = { name: 'name', companyName: 'organization', departmentName: 'off', position: 'organization-title' }[key];
+        input.setAttribute('aria-describedby', 'my-profile-error');
+        inputs[key] = { input, label };
+        const labelNode = el('label', label); labelNode.htmlFor = input.id;
+        term.replaceChildren(labelNode); value.replaceChildren(input);
       }
       fields.append(term, value);
     }
@@ -115,29 +119,36 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
     const error = el('p', '', 'my-profile-error'); error.id = 'my-profile-error'; error.setAttribute('role', 'alert');
     const save = el('button', '저장', 'primary-button'); save.type = 'submit'; save.id = 'my-profile-save';
     const cancel = button('취소', () => { renderProfile(); $('#my-profile-edit').focus(); }); cancel.id = 'my-profile-cancel';
-    actions.append(save, cancel); form.append(error, actions); content.append(form); name.focus();
-    name.addEventListener('input', () => { error.textContent = ''; name.removeAttribute('aria-invalid'); });
+    actions.append(save, cancel); form.append(error, actions); content.append(form); inputs.name.input.focus();
+    for (const { input } of Object.values(inputs)) input.addEventListener('input', () => { error.textContent = ''; input.removeAttribute('aria-invalid'); });
     form.addEventListener('submit', async event => {
       event.preventDefault();
       if (save.disabled) return;
-      const value = name.value.trim();
-      if (!value || Array.from(value).length > 50) {
-        error.textContent = '이름은 1~50자로 입력해주세요.'; name.setAttribute('aria-invalid', 'true'); name.focus(); return;
+      const values = {};
+      for (const [key, { input, label }] of Object.entries(inputs)) {
+        values[key] = input.value.trim();
+        if (!values[key] || Array.from(values[key]).length > limits[key]) {
+          error.textContent = `${label}은 1~${limits[key]}자로 입력해주세요.`; input.setAttribute('aria-invalid', 'true'); input.focus(); return;
+        }
       }
-      save.disabled = cancel.disabled = name.disabled = true; save.textContent = '저장 중...'; error.textContent = '';
+      save.disabled = cancel.disabled = true;
+      for (const { input } of Object.values(inputs)) input.disabled = true;
+      save.textContent = '저장 중...'; error.textContent = '';
       form.setAttribute('aria-busy', 'true');
       try {
-        const result = await api('/api/auth/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: value }) });
+        const result = await api('/api/auth/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
         if (version !== generation || root.hidden) return;
         user = result.user;
         renderProfile(false, '정보를 저장했습니다.');
       } catch (failure) {
         if (version !== generation || root.hidden) return;
         if (failure.status === 401) { loginRequired('정보를 수정하려면 다시 로그인해주세요.'); return; }
-        error.textContent = failure.status === 400 ? '이름은 1~50자로 입력해주세요.' : '정보를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.';
+        error.textContent = failure.status === 400 ? '입력한 회원정보와 각 항목의 길이를 확인해주세요.' : '정보를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.';
       } finally {
         if (version === generation && !root.hidden) {
-          save.disabled = cancel.disabled = name.disabled = false; save.textContent = '저장'; form.removeAttribute('aria-busy');
+          save.disabled = cancel.disabled = false;
+          for (const { input } of Object.values(inputs)) input.disabled = false;
+          save.textContent = '저장'; form.removeAttribute('aria-busy');
         }
       }
     });

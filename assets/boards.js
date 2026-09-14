@@ -57,8 +57,8 @@ async function detail(id) {
     }
     const actions=el('div','','board-actions');actions.append(button('목록으로',list));
     if(boardType!=='inquiry'&&item.canEdit)actions.append(button('수정',()=>write(item)));
-    if(boardType==='notice'&&item.canDelete&&isAdmin())actions.append(button('삭제',async event=>{
-      if(!window.confirm('이 공지사항을 삭제하시겠습니까?'))return;
+    if(item.canDelete&&(boardType==='free'||(boardType==='notice'&&isAdmin())))actions.append(button('삭제',async event=>{
+      if(!window.confirm(boardType==='notice'?'이 공지사항을 삭제하시겠습니까?':'이 게시글을 삭제하시겠습니까?'))return;
       const target=event.currentTarget;target.disabled=true;
       try{await api(`/api/boards/${encodeURIComponent(item.id)}`,{method:'DELETE'});window.dispatchEvent(new Event('hsso:boards-changed'));if(version===generation)list();}
       catch{if(version===generation)status.textContent='삭제하지 못했습니다.';target.disabled=false;}

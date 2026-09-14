@@ -8,7 +8,7 @@ import {onRequest as login} from '../functions/api/auth/login.js';
 
 const origin='https://local.example';
 async function fixture(t){const db=createTestDB();t.after(()=>db.close());db.sqlite.exec(readFileSync(new URL('../migrations/0004_boards.sql',import.meta.url),'utf8'));const users=[];for(const email of ['board-a@example.com','board-b@example.com']){const data={email,password:'board fixture password1',name:email[6].toUpperCase()+' 작성자',companyName:'회사',departmentName:'부서',position:'직급'},request=()=>new Request(origin+'/api/auth',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(data)});assert.equal((await signup({request:request(),env:{DB:db}})).status,201);const response=await login({request:request(),env:{DB:db}}),user=(await response.json()).user;users.push({id:user.id,cookie:response.headers.get('set-cookie').split(';')[0]});}return{db,a:users[0],b:users[1]};}
-async function call(handler,db,{cookie,method='GET',path='/api/boards?type=free',params={},data,raw,requestOrigin=origin}={}){const headers={Origin:requestOrigin,'Content-Type':'application/json'};if(cookie)headers.Cookie=cookie;const init={method,headers};if(['POST','PATCH'].includes(method))init.body=raw??JSON.stringify(data);const response=await handler({request:new Request(origin+path,init),env:{DB:db},params});return{status:response.status,data:await response.json()};}
+async function call(handler,db,{cookie,method='GET',path='/api/boards?type=free',params={},data,raw,requestOrigin=origin}={}){const headers={Origin:requestOrigin,'Content-Type':'application/json'};if(cookie)headers.Cookie=cookie;const init={method,headers};if(['POST','PATCH','DELETE'].includes(method))init.body=raw??JSON.stringify(data);const response=await handler({request:new Request(origin+path,init),env:{DB:db},params});return{status:response.status,data:await response.json()};}
 const payload=extra=>({boardType:'free',title:'안전 작업 의견',content:'본문 내용입니다.',...extra});
 async function create(db,user,extra){const result=await call(boardCollection,db,{cookie:user.cookie,method:'POST',data:payload(extra)});assert.equal(result.status,201);return result.data.post;}
 
@@ -18,3 +18,26 @@ test('free posting requires login, uses session owner, and notice creation stays
 test('only free-post owner can patch and ownership is exposed only as canEdit',async t=>{const{db,a,b}=await fixture(t),post=await create(db,a);const path='/api/boards/'+post.id,params={id:post.id};assert.equal((await call(boardItem,db,{cookie:b.cookie,method:'PATCH',path,params,data:{title:'탈취',content:'실패'}})).status,404);assert.equal((await call(boardItem,db,{cookie:a.cookie,method:'PATCH',path,params,data:{title:'수정 제목',content:'수정 본문'}})).status,200);const owner=await call(boardItem,db,{cookie:a.cookie,path,params});assert.equal(owner.data.post.canEdit,true);assert.equal(Object.hasOwn(owner.data.post,'authorUserId'),false);const other=await call(boardItem,db,{cookie:b.cookie,path,params});assert.equal(other.data.post.canEdit,false);});
 test('validation, body limit, Origin and SQL-looking values fail safely or remain bound',async t=>{const{db,a}=await fixture(t);for(const data of [payload({title:''}),payload({title:'x'.repeat(201)}),payload({content:''}),payload({content:'x'.repeat(10001)}),payload({boardType:'other'})])assert.equal((await call(boardCollection,db,{cookie:a.cookie,method:'POST',data})).status,400);assert.equal((await call(boardCollection,db,{cookie:a.cookie,method:'POST',raw:'x'.repeat(MAX_BOARD_BODY_BYTES+1)})).status,413);assert.equal((await call(boardCollection,db,{cookie:a.cookie,method:'POST',data:payload(),requestOrigin:'https://evil.example'})).status,403);const title="' OR 1=1 --";await create(db,a,{title});const insert=db.calls.findLast(entry=>entry.sql.startsWith('INSERT INTO board_posts'));assert(insert.args.includes(title));});
 test('search matches title and author literally using bound values',async t=>{const{db,a}=await fixture(t);await create(db,a,{title:'특수 100%_안전'});await create(db,a,{title:'다른 글'});assert.equal((await call(boardCollection,db,{path:'/api/boards?type=free&q='+encodeURIComponent('100%_')})).data.posts.length,1);assert.equal((await call(boardCollection,db,{path:'/api/boards?type=free&q='+encodeURIComponent('A 작성자')})).data.posts.length,2);assert.equal((await call(boardCollection,db,{path:'/api/boards?type=free&q='+encodeURIComponent("' OR 1=1 --")})).data.posts.length,0);const select=db.calls.findLast(entry=>entry.sql.includes('LIKE'));assert(select.args.some(arg=>String(arg).includes("' OR 1=1 --")));});
+
+
+test('free-post owner can delete; deleted post disappears from list and detail',async t=>{
+  const {db,a,b}=await fixture(t),post=await create(db,a),other=await create(db,b);
+  const path='/api/boards/'+post.id,params={id:post.id};
+  for(const [cookie,allowed] of [[a.cookie,true],[b.cookie,false],[undefined,false]])
+    assert.equal((await call(boardItem,db,{cookie,path,params})).data.post.canDelete,allowed);
+  assert.equal((await call(boardItem,db,{cookie:a.cookie,method:'DELETE',path,params})).status,200);
+  const deletion=db.calls.findLast(entry=>entry.sql.startsWith('DELETE FROM board_posts'));
+  assert.match(deletion.sql,/author_user_id=\?/);assert.deepEqual(deletion.args,[post.id,a.id]);
+  assert.deepEqual((await call(boardCollection,db)).data.posts.map(p=>p.id),[other.id]);
+  assert.equal((await call(boardItem,db,{path,params})).status,404);
+});
+
+test('free-post deletion rejects anonymous, other users, spoofed ownership and cross-origin requests',async t=>{
+  const {db,a,b}=await fixture(t),post=await create(db,a);
+  const path='/api/boards/'+post.id,params={id:post.id},data={user_id:a.id,author_user_id:a.id,authorUserId:a.id,role:'admin',isAdmin:true,boardType:'notice'};
+  assert.equal((await call(boardItem,db,{method:'DELETE',path,params,data})).status,401);
+  assert.equal((await call(boardItem,db,{cookie:b.cookie,method:'DELETE',path:path+'?user_id='+a.id,params,data})).status,403);
+  assert.equal((await call(boardItem,db,{cookie:a.cookie,method:'DELETE',path,params,requestOrigin:'https://evil.example'})).status,403);
+  assert.equal(db.calls.some(entry=>entry.sql.startsWith('DELETE FROM board_posts')),false);
+  assert.equal((await call(boardCollection,db)).data.posts[0].id,post.id);
+});

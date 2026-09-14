@@ -103,5 +103,27 @@ test('Chrome admin notice CRUD, inquiry answers, ordinary-user controls and resp
     assert.equal(await evaluate(`document.querySelector('.board-answer-content').textContent`),`Edited answer ${width}`);
     assert.equal(await evaluate(`!!document.querySelector('.board-answer-form')`),false);
   }
+  for(const width of [1440,390]) {
+    await cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
+    const id=crypto.randomUUID();
+    db.sqlite.prepare('INSERT INTO board_posts VALUES (?,?,?,?,?,?,?,?)').run(id,'free',owner.id,'Owner free post','Free body',0,now,now);
+    await open(admin);await click('[data-board-select="free"]');await ready();await clickText('Owner free post');await ready();
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('.board-actions button')].map(b=>b.textContent)`),['목록으로']);
+    await open(owner);await click('[data-board-select="free"]');await ready();await clickText('Owner free post');await ready();
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('.board-actions button')].map(b=>b.textContent)`),['목록으로','수정','삭제']);
+    assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
+    await evaluate(`window.confirm=message=>{window.__deletePrompt=message;return false;}`);
+    await clickText('삭제');
+    assert.equal(await evaluate('window.__deletePrompt'),'이 게시글을 삭제하시겠습니까?');
+    assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM board_posts WHERE id=?').get(id).n,1);
+    await evaluate(`window.confirm=()=>true;window.__realFetch=window.fetch;window.__deleteCalls=0;window.fetch=(url,options)=>{if(options?.method==='DELETE'){window.__deleteCalls++;return Promise.resolve(new Response(JSON.stringify({ok:false,error:'INTERNAL_SERVER_ERROR'}),{status:500}));}return window.__realFetch(url,options);}`);
+    await clickText('삭제');await wait(`document.querySelector('#board-status').textContent==='삭제하지 못했습니다.'`);
+    assert.equal(await evaluate('window.__deleteCalls'),1);
+    assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM board_posts WHERE id=?').get(id).n,1);
+    await evaluate('window.fetch=window.__realFetch');
+    await clickText('삭제');await wait(`!!document.querySelector('.board-empty')`);
+    assert.equal(await evaluate(`document.querySelector('#board-content h1').textContent`),'자유게시판');
+    assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM board_posts WHERE id=?').get(id).n,0);
+  }
   assert.deepEqual(errors,[]);
 });
