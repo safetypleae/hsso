@@ -1,3 +1,5 @@
+import { isValidSignupPassword } from '../../../password-policy.js';
+
 // Workers' reported native PBKDF2 cap is 100,000, below OWASP's 600,000
 // SHA-256 recommendation. Revisit when the runtime limit changes:
 // https://github.com/cloudflare/workerd/issues/1346
@@ -60,12 +62,17 @@ export async function onRequest(context) {
 
   const values = {};
   for (const [field, maxLength] of Object.entries(FIELD_LIMITS)) {
+    if (field === 'password') {
+      if (!isValidSignupPassword(input.password)) return failure('INVALID_PASSWORD', 400, 'password');
+      values.password = input.password;
+      continue;
+    }
     if (typeof input[field] !== 'string' || !input[field].trim()) {
       return failure('INVALID_INPUT', 400, field);
     }
     const value = field === 'password' ? input[field] : input[field].trim();
     const length = Array.from(value).length;
-    if (length > maxLength || (field === 'password' && length < 8)) {
+    if (length > maxLength) {
       return failure('INVALID_INPUT', 400, field);
     }
     values[field] = value;

@@ -5,7 +5,7 @@ import { onRequest } from '../functions/api/auth/signup.js';
 
 // In-memory mock only: these tests never access Cloudflare or a real database.
 const payload = {
-  email: ' Person@Example.com ', password: '  valid password  ', name: ' 홍길동 ',
+  email: ' Person@Example.com ', password: '  valid password1  ', name: ' 홍길동 ',
   companyName: ' HSSO ', departmentName: ' 안전팀 ', position: ' 담당자 '
 };
 const selectSql = 'SELECT id FROM users WHERE email = ? LIMIT 1';
@@ -109,7 +109,7 @@ test('validates email format and every length limit', async () => {
     assert.equal((await call({ ...payload, [field]: '가'.repeat(max + 1) })).response.status, 400, field);
   }
   assert.equal((await call({ ...payload, password: '1234567' })).response.status, 400);
-  for (const password of ['12345678', '가'.repeat(128)]) {
+  for (const password of ['abc12345', '가'.repeat(126) + 'a1']) {
     assert.equal((await call({ ...payload, password, name: '가'.repeat(50), companyName: '가'.repeat(100), departmentName: '가'.repeat(100), position: '가'.repeat(50) })).response.status, 201);
   }
 });
@@ -195,3 +195,29 @@ test('Web Crypto failure returns generic 500 without attempting INSERT', async (
     crypto.subtle.deriveBits = original;
   }
 });
+
+for (const [label, password, accepted] of [
+  ['lowercase', 'abc12345', true], ['uppercase', 'HSSO2026', true],
+  ['digits only', '12345678', false], ['letters only', 'abcdefgh', false],
+  ['short', 'abc123', false], ['empty', '', false], ['missing', undefined, false],
+  ['digits and symbols', '123456!@', false], ['letters and symbols', 'abcdef!@', false],
+  ['non-string', 12345678, false], ['non-ASCII letters', '가나다라마바사1', false],
+  ['non-ASCII digits', 'abcdef１２', false], ['code-point length', 'a1😀😀😀', false],
+  ['over maximum', 'a1' + 'x'.repeat(127), false]
+]) {
+  test('signup policy: ' + label, async () => {
+    const original = crypto.subtle.deriveBits;
+    let derives = 0;
+    crypto.subtle.deriveBits = function (...args) { derives++; return original.apply(this, args); };
+    try {
+      const { response, body, db } = await call({ ...payload, password });
+      assert.equal(response.status, accepted ? 201 : 400);
+      assert.equal(db.rows.size, accepted ? 1 : 0);
+      assert.equal(derives, accepted ? 1 : 0);
+      if (!accepted) {
+        assert.deepEqual(body, { ok: false, error: 'INVALID_PASSWORD', field: 'password' });
+        assert.equal(db.calls.length, 0);
+      }
+    } finally { crypto.subtle.deriveBits = original; }
+  });
+}

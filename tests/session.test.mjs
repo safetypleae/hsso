@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { onRequest as signup } from '../functions/api/auth/signup.js';
 import { onRequest as login } from '../functions/api/auth/login.js';
 import { onRequest as me } from '../functions/api/auth/me.js';
@@ -8,7 +8,7 @@ import { onRequest as logout } from '../functions/api/auth/logout.js';
 import { verifyPassword, SESSION_SECONDS } from '../server/auth-session.js';
 import { createTestDB } from './helpers/d1-memory.mjs';
 
-const sample = { email: 'tester@example.com', password: '  test password  ', name: '테스트', companyName: '예시 회사', departmentName: '예시 부서', position: '담당자' };
+const sample = { email: 'tester@example.com', password: '  test password1  ', name: '테스트', companyName: '예시 회사', departmentName: '예시 부서', position: '담당자' };
 const origin = 'https://hsso.pages.dev';
 async function call(handler, db, { method = handler === me ? 'GET' : 'POST', body, cookie, requestOrigin = origin, raw, contentType = 'application/json' } = {}) {
   const headers = {};
@@ -184,4 +184,21 @@ test('internal DB failures are generic and never falsely issue or clear a sessio
   }
   db.fail=false;
   assert.equal((await call(me,db,{cookie:result.cookie})).response.status,200);
+});
+
+test('legacy passwords without letters or digits still login without changing users', async t => {
+  const db = createTestDB();
+  t.after(() => db.close());
+  for (const [index, password] of ['12345678', 'abcdefgh', '123456!@', 'abcdef!@'].entries()) {
+    const salt = randomBytes(16);
+    const hash = 'v1$pbkdf2_sha256$100000$' + salt.toString('hex') + '$' + pbkdf2Sync(password, salt, 100000, 32, 'sha256').toString('hex');
+    const email = 'legacy' + index + '@example.com';
+    db.sqlite.prepare('INSERT INTO users (id,email,password_hash,name,company_name,department_name,position) VALUES (?,?,?,?,?,?,?)').run(crypto.randomUUID(), email, hash, 'Legacy', 'Company', 'Team', 'Staff');
+    const before = db.sqlite.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const result = await call(login, db, { body: { email, password } });
+    assert.equal(result.response.status, 200);
+    assert(result.cookie);
+    assert.deepEqual(db.sqlite.prepare('SELECT * FROM users WHERE email = ?').get(email), before);
+    assert(!db.calls.some(c => /UPDATE\s+users/i.test(c.sql)));
+  }
 });

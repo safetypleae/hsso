@@ -639,6 +639,8 @@ fieldset.worker-section { padding-top: 18px; margin-top: 18px; }
 .auth-field input[aria-invalid="true"] { border-color: #b83a36; }
 .auth-field-help, .auth-field-error { font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
 .auth-field-help { color: var(--muted); }
+.auth-password-conditions { list-style: none; margin: 0; padding: 0; }
+.auth-password-conditions .is-met { color: var(--green); }
 .auth-field-error { color: #aa302d; }
 .auth-submit { min-height: 54px; width: 100%; margin-top: 8px; padding: 14px 20px; border: 1px solid var(--navy); border-radius: 3px; color: #fff; background: var(--navy); font-size: 16px; font-weight: 600; }
 .auth-submit:hover:not(:disabled) { background: #1b3a51; }

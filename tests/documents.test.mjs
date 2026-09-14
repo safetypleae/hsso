@@ -23,7 +23,7 @@ async function fixture(t) {
   db.sqlite.exec(readFileSync(new URL('../migrations/0002_saved_documents.sql',import.meta.url),'utf8'));
   const accounts=[];
   for(const email of ['one@example.com','two@example.com']) {
-    const body={email,password:'fixture password',name:'테스트',companyName:'회사',departmentName:'부서',position:'직급'};
+    const body={email,password:'fixture password1',name:'테스트',companyName:'회사',departmentName:'부서',position:'직급'};
     const request=()=>new Request(origin+'/api/auth/test',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)});
     assert.equal((await signup({request:request(),env:{DB:db}})).status,201);
     const response=await login({request:request(),env:{DB:db}});const user=(await response.json()).user;
@@ -112,7 +112,7 @@ test('responses omit identity internals, password/session hashes and raw tokens;
   const {db,a}=await fixture(t);const doc=await save(db,a);
   for(const options of [{},{id:doc.id}]) {
     const serialized=JSON.stringify((await call(db,a.cookie,options)).data);
-    for(const secret of ['password_hash','token_hash','user_id','fixture password',a.cookie.split('=')[1]])assert(!serialized.includes(secret));
+    for(const secret of ['password_hash','token_hash','user_id','fixture password1',a.cookie.split('=')[1]])assert(!serialized.includes(secret));
   }
   assert(db.calls.filter(call=>call.sql.includes('saved_documents')).every(call=>!call.sql.includes(a.id)&&!call.sql.includes(warning.productName)));
 });

@@ -1,7 +1,9 @@
+import { passwordConditions, isValidSignupPassword, PASSWORD_POLICY_MESSAGE, PASSWORD_MAX_LENGTH } from './password-policy.js';
+
 // Account forms only. Navigation stays in the existing application view switcher.
 const SIGNUP_ENDPOINT = '/api/auth/signup';
 const EMAIL_PATTERN = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i;
-const LIMITS = { name: 50, companyName: 100, departmentName: 100, position: 50, email: 254, password: 128, passwordConfirm: 128 };
+const LIMITS = { name: 50, companyName: 100, departmentName: 100, position: 50, email: 254, password: PASSWORD_MAX_LENGTH, passwordConfirm: PASSWORD_MAX_LENGTH };
 const SERVER_ERROR = '회원가입 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 
 export function initAuthUI(navigate) {
@@ -71,11 +73,25 @@ export function initAuthUI(navigate) {
 
   function clearPasswords() {
     document.querySelectorAll('.auth-view input[type="password"]').forEach(input => { input.value = ''; });
+    renderPasswordConditions();
   }
+
+  function renderPasswordConditions() {
+    const conditions = passwordConditions(signupForm.elements.password.value);
+    for (const [key, label] of Object.entries({ length: '8자 이상', letter: '영문 포함', digit: '숫자 포함' })) {
+      const item = document.getElementById(`signup-password-${key}`);
+      item.textContent = `${conditions[key] ? '✓' : '○'} ${label}`;
+      item.classList.toggle('is-met', conditions[key]);
+    }
+  }
+  renderPasswordConditions();
 
   fields.forEach(input => input.addEventListener('input', () => {
     clearFieldError(input);
-    if (input.name === 'password') clearFieldError(signupForm.elements.passwordConfirm);
+    if (input.name === 'password') {
+      clearFieldError(signupForm.elements.passwordConfirm);
+      renderPasswordConditions();
+    }
     signupMessage.hidden = true;
   }));
 
@@ -164,7 +180,7 @@ export function initAuthUI(navigate) {
       let error = '';
       if (!value.trim()) error = '필수 항목입니다. 입력해주세요.';
       else if (length > LIMITS[input.name]) error = `${LIMITS[input.name]}자 이하로 입력해주세요.`;
-      else if (input.name === 'password' && length < 8) error = '비밀번호는 8자 이상 입력해주세요.';
+      else if (input.name === 'password' && !isValidSignupPassword(value)) error = PASSWORD_POLICY_MESSAGE;
       else if (input.name === 'email') {
         const localPart = value.split('@')[0];
         if (!EMAIL_PATTERN.test(value) || localPart.startsWith('.') || localPart.endsWith('.') || localPart.includes('..')) {
@@ -209,6 +225,7 @@ export function initAuthUI(navigate) {
       } else {
         let message = SERVER_ERROR;
         if (response.status === 409 && result?.error === 'EMAIL_ALREADY_EXISTS') message = '이미 가입된 이메일입니다.';
+        else if (response.status === 400 && result?.error === 'INVALID_PASSWORD') message = PASSWORD_POLICY_MESSAGE;
         else if (response.status === 400) message = '입력한 정보를 다시 확인해주세요.';
         else if (response.status === 403) message = '요청을 처리할 수 없습니다.';
         showMessage(signupMessage, message);

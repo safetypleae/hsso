@@ -40,7 +40,7 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
       }
       if(url.pathname==='/pdf-stub.js'){res.writeHead(200,{'Content-Type':'text/javascript'}).end('export const GlobalWorkerOptions = {};');return;}
       const relative=url.pathname==='/'?'index.html':decodeURIComponent(url.pathname.slice(1));
-      if(!['index.html','script.js','auth.js','mypage.js','saved-document-preview.js','style.css','mypage.css'].includes(relative)&&!/^assets\/[a-z0-9/.-]+$/i.test(relative)){res.writeHead(404).end();return;}
+      if(!['index.html','script.js','auth.js','password-policy.js','mypage.js','saved-document-preview.js','style.css','mypage.css'].includes(relative)&&!/^assets\/[a-z0-9/.-]+$/i.test(relative)){res.writeHead(404).end();return;}
       let content=await readFile(join(project,relative));
       if(relative==='index.html')content=content.toString().replace(/<script src="https:[^"]+"><\/script>/g,'');
       if(relative==='script.js') {
@@ -73,7 +73,33 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
   const ready=()=>wait(`document.querySelector('#my-status').textContent === '' && !!document.querySelector('#my-content h1')`);
   await cdp('Page.navigate',{url:base+'/#mypage'});await wait(`location.hash === '#login' && document.querySelector('#login-message').textContent.includes('로그인이 필요')`);
   assert.equal(await evaluate(`document.querySelector('#my-content').textContent`),'');
-  const fixture={email:'browser@example.com',password:'browser fixture password',name:'검증 사용자',companyName:'검증 회사',departmentName:'검증 부서',position:'담당자'};
+  await click('[data-view-link="signup"]');
+  await wait("location.hash === '#signup'");
+  await evaluate("window.__signupCalls=0; const originalFetch=window.fetch; window.fetch=(url,options)=>{if(url==='/api/auth/signup')window.__signupCalls++;return originalFetch(url,options);}");
+  for (const [value, expected] of [
+    ['', ['○ 8자 이상','○ 영문 포함','○ 숫자 포함']],
+    ['abcdefgh', ['✓ 8자 이상','✓ 영문 포함','○ 숫자 포함']],
+    ['12345678', ['✓ 8자 이상','○ 영문 포함','✓ 숫자 포함']],
+    ['abc123', ['○ 8자 이상','✓ 영문 포함','✓ 숫자 포함']],
+    ['abc12345', ['✓ 8자 이상','✓ 영문 포함','✓ 숫자 포함']],
+    ['', ['○ 8자 이상','○ 영문 포함','○ 숫자 포함']]
+  ]) {
+    await evaluate(`document.querySelector('#signup-password').value=${JSON.stringify(value)};document.querySelector('#signup-password').dispatchEvent(new Event('input',{bubbles:true}))`);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.auth-password-conditions li')].map(e=>e.textContent)"), expected);
+  }
+  await evaluate("for(const input of document.querySelectorAll('#signup-form input'))input.value=input.name==='email'?'ui@example.com':input.type==='password'?'abcdefgh':'Example';document.querySelector('#signup-form').requestSubmit()");
+  assert.equal(await evaluate("document.querySelector('#signup-password-error').hidden"),false);
+  assert.equal(await evaluate("document.querySelector('#signup-password-error').textContent"),'비밀번호는 8자 이상이며 영문과 숫자를 포함해야 합니다.');
+  assert.equal(await evaluate('window.__signupCalls'),0);
+  await evaluate("document.querySelector('#signup-password').value='abc12345';document.querySelector('#signup-form').requestSubmit()");
+  assert.equal(await evaluate("document.querySelector('#signup-password-confirm-error').hidden"),false);
+  assert.equal(await evaluate('window.__signupCalls'),0);
+  await evaluate("document.querySelector('#signup-password-confirm').value='abc12345';document.querySelector('#signup-form').requestSubmit()");
+  await wait("location.hash === '#login'");
+  assert.equal(await evaluate('window.__signupCalls'),1);
+  assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM users WHERE email='ui@example.com'").get().n,1);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.auth-password-conditions li')].map(e=>e.textContent)"),['○ 8자 이상','○ 영문 포함','○ 숫자 포함']);
+  const fixture={email:'browser@example.com',password:'browser fixture password1',name:'검증 사용자',companyName:'검증 회사',departmentName:'검증 부서',position:'담당자'};
   const request=()=>new Request(base+'/api/auth/signup',{method:'POST',headers:{'Content-Type':'application/json',Origin:base},body:JSON.stringify(fixture)});
   assert.equal((await signup({request:request(),env:{DB:db}})).status,201);
   const auth=await login({request:request(),env:{DB:db}});const cookie=auth.headers.get('set-cookie').split(';')[0].split('=');
