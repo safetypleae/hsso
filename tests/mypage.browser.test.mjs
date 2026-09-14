@@ -1,3 +1,4 @@
+import { onRequest as updateProfile } from '../functions/api/auth/profile.js';
 // No packages required. Run with HSSO_BROWSER pointing to Chrome/Edge.
 // Local HTTP + actual Functions + disposable SQLite only. PDF CDN modules are stubbed;
 // this suite checks UI integration, not parsing, rasterization or PDF export.
@@ -32,7 +33,7 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
       if(url.pathname.startsWith('/api/')) {
         const chunks=[];for await(const chunk of req)chunks.push(chunk);
         const request=new Request(url,{method:req.method,headers:req.headers,...(['GET','HEAD'].includes(req.method)?{}:{body:Buffer.concat(chunks)})});
-        const handlers={'/api/auth/signup':signup,'/api/auth/login':login,'/api/auth/logout':logout,'/api/auth/me':me,'/api/documents':collection,'/api/risk-surveys':surveyCollection};
+        const handlers={'/api/auth/profile':updateProfile,'/api/auth/signup':signup,'/api/auth/login':login,'/api/auth/logout':logout,'/api/auth/me':me,'/api/documents':collection,'/api/risk-surveys':surveyCollection};
         const handler=handlers[url.pathname] || (url.pathname.startsWith('/api/documents/')?item:null);
         if(!handler){res.writeHead(404).end();return;}
         const response=failDocuments&&url.pathname==='/api/documents'?Response.json({ok:false,error:'INTERNAL_SERVER_ERROR'},{status:500}):await handler({request,env:{DB:db},params:{id:url.pathname.split('/')[3]}});
@@ -116,6 +117,68 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
     await click('.logo');assert.equal(await evaluate(`document.querySelector('#home').hidden`),false);
     if(width<=900)await click('.menu-button');await click('#msds-menu-button');assert.equal(await evaluate(`document.querySelector('#msds-menu').hidden`),false);
     await click('[data-view-link="risk-assessment"]');assert.equal(await evaluate(`document.querySelector('#risk-assessment').hidden`),false);
+  }
+  // Profile save/cancel and read-only fields, then MSDS menu styles and interaction.
+  for(const width of [1440,390]) {
+    await cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
+    await cdp('Page.navigate',{url:base+'/#mypage'});await ready();
+    await click('[data-my-section="profile"]');await ready();
+    assert.equal(await evaluate("document.querySelector('#my-content').textContent.includes('일반 회원')"),true);
+    const beforeName=db.sqlite.prepare('SELECT name FROM users WHERE email=?').get(fixture.email).name;
+    await click('#my-profile-edit');
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.my-profile-form input')].map(e=>e.name)"),['name']);
+    await evaluate("document.querySelector('#my-profile-name').value='취소할 이름'");
+    await click('#my-profile-cancel');
+    assert.equal(db.sqlite.prepare('SELECT name FROM users WHERE email=?').get(fixture.email).name,beforeName);
+    await click('#my-profile-edit');
+    await evaluate("document.querySelector('#my-profile-name').value=' ';document.querySelector('.my-profile-form').requestSubmit()");
+    assert.equal(await evaluate("document.querySelector('#my-profile-error').textContent"),'이름은 1~50자로 입력해주세요.');
+    const changed='수정 사용자 '+width;
+    await evaluate(`document.querySelector('#my-profile-name').value=${JSON.stringify(changed)};document.querySelector('.my-profile-form').requestSubmit()`);
+    await wait("document.querySelector('#my-status').textContent==='정보를 저장했습니다.'");
+    assert.equal(await evaluate(`document.querySelector('#my-content').textContent.includes(${JSON.stringify(changed)})`),true);
+    assert.equal(db.sqlite.prepare('SELECT name FROM users WHERE email=?').get(fixture.email).name,changed);
+    assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
+    await click('[data-my-section="dashboard"]');await ready();
+    assert.equal(await evaluate(`document.querySelector('#my-content h1').textContent.includes(${JSON.stringify(changed)})`),true);
+    await click('.logo');
+    if(width<=700) {
+      // Mobile home intentionally uses the portal drawer instead of the dropdown.
+      await click('#portal-menu-button');await wait("!document.querySelector('#portal-menu').hidden");
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('#portal-menu .msds-unavailable')).color"),'rgb(154, 166, 177)');
+      assert.equal(await evaluate("document.querySelector('#portal-menu .msds-unavailable').disabled"),true);
+      assert.notEqual(await evaluate("getComputedStyle(document.querySelector('#portal-menu [data-view-link=maker]')).color"),'rgb(154, 166, 177)');
+      await click('#portal-menu .msds-unavailable');
+      assert.equal(await evaluate("document.querySelector('#portal-menu').hidden"),false);
+      await click('#portal-menu [data-view-link="maker"]');
+      assert.equal(await evaluate('location.hash'),'#maker');
+      await click('[data-view-link="risk-assessment"]');
+    }
+    async function openMsds() {
+      if(width<=900 && !await evaluate("document.querySelector('#main-menu').classList.contains('open')"))await click('.menu-button');
+      await click('#msds-menu-button');
+      await wait("!document.querySelector('#msds-menu').hidden");
+    }
+    await openMsds();
+    const styles=await evaluate("[...document.querySelectorAll('#msds-menu a, #msds-menu button')].map(e=>({color:getComputedStyle(e).color,cursor:getComputedStyle(e).cursor,disabled:e.disabled===true,text:e.textContent}))");
+    assert.equal(styles.length,3);assert.equal(styles[0].color,'rgb(17, 37, 61)');assert.equal(styles[1].color,'rgb(17, 37, 61)');
+    assert.equal(styles[2].color,'rgb(154, 166, 177)');assert.equal(styles[2].disabled,true);assert.equal(styles[2].cursor,'not-allowed');assert(styles[2].text.includes('준비 중'));
+    for(const [selector,color,background] of [['#msds-menu button','rgb(154, 166, 177)','rgba(0, 0, 0, 0)'],['#msds-menu a','rgb(15, 82, 107)','rgb(242, 247, 248)']]) {
+      const point=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+      await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',...point});
+      assert.deepEqual(await evaluate(`(()=>{const s=getComputedStyle(document.querySelector(${JSON.stringify(selector)}));return[s.color,s.backgroundColor]})()`),[color,background],JSON.stringify({width,selector,point,hit:await evaluate(`document.elementFromPoint(${point.x},${point.y})?.outerHTML`),hover:await evaluate(`document.querySelector(${JSON.stringify(selector)}).matches(':hover')`)}));
+    }
+    await evaluate("window.__disabledClicks=0;document.querySelector('#msds-menu button').addEventListener('click',()=>window.__disabledClicks++);document.querySelector('#msds-menu button').click()");
+    assert.equal(await evaluate('window.__disabledClicks'),0);
+    assert.equal(await evaluate("document.querySelector('#msds-menu').hidden"),false);
+    assert.equal(await evaluate("document.querySelector('#portal-menu .msds-unavailable').disabled"),true);
+    assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
+    for(const view of ['maker','process-guide']) {
+      if(await evaluate("document.querySelector('#msds-menu').hidden"))await openMsds();
+      await click('#msds-menu [data-view-link="'+view+'"]');
+      assert.equal(await evaluate('location.hash'),'#'+view);
+      assert.equal(await evaluate(`document.getElementById(${JSON.stringify(view)}).hidden`),false);
+    }
   }
   // Seed final editable UI state; this intentionally does not exercise the PDF parser.
   await click('[data-view-link="maker"]');

@@ -478,7 +478,10 @@ fieldset.worker-section { padding-top: 18px; margin-top: 18px; }
 .nav-dropdown-trigger[aria-expanded="true"] .nav-chevron { margin-top: 4px; transform: rotate(225deg); }
 .nav-submenu { position: absolute; top: 100%; left: -24px; width: 276px; padding: 12px; border: 1px solid var(--line); border-top: 2px solid var(--blue); background: #fff; box-shadow: 0 8px 16px rgba(17,37,61,.05); }
 .main-nav .nav-submenu a, .nav-submenu button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 50px; padding: 12px; border: 0; color: #536274; background: transparent; text-align: left; font-size: 16px; font-weight: 500; line-height: 1.6; }
-.main-nav .nav-submenu a:hover, .main-nav .nav-submenu a.active, .nav-submenu button:hover { color: var(--blue-dark); background: #f2f7f8; }
+#main-menu #msds-menu a { color: var(--navy); font-weight: 600; }
+#main-menu #msds-menu a:hover, #main-menu #msds-menu a.active, .nav-submenu button:not(:disabled):hover { color: var(--blue-dark); background: #f2f7f8; }
+.nav-submenu .msds-unavailable:disabled, .portal-menu section > .msds-unavailable:disabled { color: #9aa6b1; background: transparent; border-color: transparent; cursor: not-allowed; }
+.msds-unavailable:disabled .nav-menu-note, .msds-unavailable:disabled small { color: inherit; }
 .main-nav .nav-submenu a.active::after { display: none; }
 .nav-menu-note { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .site-header button:focus-visible, .main-nav .nav-submenu a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }

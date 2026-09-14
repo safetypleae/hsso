@@ -5,7 +5,7 @@ const date = value => new Date(value).toLocaleDateString('ko-KR', { timeZone: 'A
 
 export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
   const root = $('#mypage'); const content = $('#my-content'); const status = $('#my-status');
-  let generation = 0; let current = 'dashboard'; let user; let offset = 0;
+  let generation = 0; let current = 'dashboard'; let user; let role; let offset = 0;
   let filters = { type: '', period: '90', q: '' };
   let pendingDelete; let opener;
   const dialog = $('#my-delete-dialog');
@@ -88,6 +88,60 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
   }
   async function renderResponsePage(id,next){await riskDetail(id); if(next){const data=await api(`/api/risk-surveys/${encodeURIComponent(id)}/responses?limit=20&offset=${next}`); const list=content.querySelector('.my-document-list:last-of-type');list?.nextElementSibling?.remove();list?.remove();renderResponses(id,data,next);}}
   async function riskResponseDetail(surveyId,responseId){const version=++generation;clearContent();status.textContent='응답을 불러오는 중입니다.';try{const {response}=await api(`/api/risk-surveys/${encodeURIComponent(surveyId)}/responses/${encodeURIComponent(responseId)}`);if(version!==generation||root.hidden)return;status.textContent='';content.append(button('← 설문 상세로 돌아가기',()=>riskDetail(surveyId)));heading('응답 상세',`제출일 ${date(response.submittedAt)}`);const fields=[['이름',response.isAnonymous?'익명':response.respondentName],['부서',response.isAnonymous?null:response.department],['사번',response.isAnonymous?null:response.employeeId],['위험요인 여부',response.hasHazard?'있음':'없음'],['위험유형',response.hazardTypes.join(', ')],['위험상황',response.hazardDescription],['작업장소',response.location],['개선 전 위험성',response.preRiskScore==null?null:`발생가능성 ${response.preLikelihood} × 중대성 ${response.preSeverity} = ${response.preRiskScore}`],['개선의견',response.improvementSuggestion],['개선 후 예상 위험성',response.postRiskScore==null?null:`발생가능성 ${response.postLikelihood} × 중대성 ${response.postSeverity} = ${response.postRiskScore}`],['안전 사유',response.safeReason]];const info=el('dl','','my-profile my-response-detail');for(const [label,value] of fields.filter(([,value])=>value!==null&&value!=='')){info.append(el('dt',label),el('dd',value));}content.append(info);}catch(error){fail(error,version);}}
+  function renderProfile(editing = false, notice = '') {
+    const version = ++generation;
+    clearContent(); status.textContent = notice;
+    heading('내 정보', editing ? '이름을 수정할 수 있습니다. 이메일과 관리자 여부는 변경할 수 없습니다.' : '현재 등록된 회원정보입니다.');
+    const form = el('form', '', 'my-profile-form'); form.noValidate = true;
+    const fields = el('dl', '', 'my-profile');
+    const name = document.createElement('input');
+    name.id = 'my-profile-name'; name.name = 'name'; name.autocomplete = 'name'; name.value = user.name;
+    name.required = true; name.setAttribute('aria-describedby', 'my-profile-error');
+    for (const [key, label] of Object.entries({ name: '이름', email: '이메일', companyName: '회사명', departmentName: '부서명', position: '직급' })) {
+      const term = el('dt', label), value = el('dd', user[key] || '—');
+      if (key === 'name' && editing) {
+        const labelNode = el('label', label); labelNode.htmlFor = name.id;
+        term.replaceChildren(labelNode); value.replaceChildren(name);
+      }
+      fields.append(term, value);
+    }
+    fields.append(el('dt', '관리자 여부'), el('dd', role === 'admin' ? '관리자' : '일반 회원'));
+    form.append(fields);
+    const actions = el('div', '', 'my-actions');
+    if (!editing) {
+      const edit = button('정보 수정', () => renderProfile(true)); edit.id = 'my-profile-edit';
+      actions.append(edit); form.append(actions); content.append(form); return;
+    }
+    const error = el('p', '', 'my-profile-error'); error.id = 'my-profile-error'; error.setAttribute('role', 'alert');
+    const save = el('button', '저장', 'primary-button'); save.type = 'submit'; save.id = 'my-profile-save';
+    const cancel = button('취소', () => { renderProfile(); $('#my-profile-edit').focus(); }); cancel.id = 'my-profile-cancel';
+    actions.append(save, cancel); form.append(error, actions); content.append(form); name.focus();
+    name.addEventListener('input', () => { error.textContent = ''; name.removeAttribute('aria-invalid'); });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (save.disabled) return;
+      const value = name.value.trim();
+      if (!value || Array.from(value).length > 50) {
+        error.textContent = '이름은 1~50자로 입력해주세요.'; name.setAttribute('aria-invalid', 'true'); name.focus(); return;
+      }
+      save.disabled = cancel.disabled = name.disabled = true; save.textContent = '저장 중...'; error.textContent = '';
+      form.setAttribute('aria-busy', 'true');
+      try {
+        const result = await api('/api/auth/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: value }) });
+        if (version !== generation || root.hidden) return;
+        user = result.user;
+        renderProfile(false, '정보를 저장했습니다.');
+      } catch (failure) {
+        if (version !== generation || root.hidden) return;
+        if (failure.status === 401) { loginRequired('정보를 수정하려면 다시 로그인해주세요.'); return; }
+        error.textContent = failure.status === 400 ? '이름은 1~50자로 입력해주세요.' : '정보를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.';
+      } finally {
+        if (version === generation && !root.hidden) {
+          save.disabled = cancel.disabled = name.disabled = false; save.textContent = '저장'; form.removeAttribute('aria-busy');
+        }
+      }
+    });
+  }
   async function load() {
     const version = ++generation; clearContent(); status.textContent = '불러오는 중입니다.';
     $('#my-nav').hidden = true;
@@ -95,15 +149,13 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
       const session = await api('/api/auth/me');
       if (version !== generation || root.hidden) return;
       user = session.user;
+      role = session.role;
       $('#my-nav').hidden = false;
       $('#my-nav').querySelectorAll('button').forEach(node=>{
         if (node.dataset.mySection === current) node.setAttribute('aria-current','page'); else node.removeAttribute('aria-current');
       });
       if (current === 'profile') {
-        heading('내 정보','현재 등록된 회원정보입니다.');
-        const fields = el('dl','','my-profile');
-        for (const [key,label] of Object.entries({name:'이름',email:'이메일',companyName:'회사명',departmentName:'부서명',position:'직급'})) fields.append(el('dt',label),el('dd',user[key] || '—'));
-        content.append(fields); status.textContent = ''; return;
+        renderProfile(); return;
       }
       if (current === 'risk') { const data=await api('/api/risk-surveys'); if(version!==generation||root.hidden)return; status.textContent=''; await riskWorkspace(data); return; }
       const params = new URLSearchParams(current === 'dashboard' ? {period:'90',limit:'5'} : {...filters,limit:'20',offset:String(offset)});

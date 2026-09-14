@@ -31,6 +31,10 @@
 .my-profile { display: grid; grid-template-columns: 140px minmax(0,1fr); margin-top: 32px; }
 .my-profile dt, .my-profile dd { padding: 18px 0; margin: 0; border-bottom: 1px solid #dce3e7; overflow-wrap: anywhere; }
 .my-profile dt { color: var(--muted); }
+.my-profile-form .my-profile { margin-bottom: 24px; }
+.my-profile-form input { width: 100%; min-width: 0; min-height: 44px; border: 1px solid #cbd5dc; border-radius: 3px; padding: 10px; background: white; color: var(--navy); font: inherit; }
+.my-profile-form input[aria-invalid="true"] { border-color: #aa302d; }
+.my-profile-error { color: #aa302d; font-size: 14px; }
 .saved-preview-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-block: 24px 16px; }
 .saved-preview-controls label { display: grid; gap: 8px; min-width: 0; font-size: 14px; }
 .saved-preview-controls select, .saved-preview-controls input { max-width: 100%; min-width: 0; min-height: 44px; padding: 10px; border: 1px solid #cbd5dc; border-radius: 3px; background: white; font: inherit; }
