@@ -1,0 +1,27 @@
+.risk-statistics { max-width: 960px; margin: 0 auto; }
+.risk-statistics h1 { margin-top: 24px; overflow-wrap: anywhere; }
+.risk-statistics .risk-stat-total { font-size: 24px; font-weight: 750; color: var(--navy); }
+.risk-statistics .risk-stat-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 16px; margin: 24px 0 16px; }
+.risk-statistics .risk-stat-controls label { display: grid; gap: 8px; flex: 1 1 180px; min-width: 0; font-weight: 700; }
+.risk-statistics select { width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff; }
+.risk-statistics select:disabled { color: #68737e; background: #f2f4f6; }
+.risk-statistics .risk-stat-caption { color: #596675; font-size: 13px; line-height: 1.7; }
+.risk-statistics .risk-stat-cards { display: grid; gap: 24px; margin-top: 24px; }
+.risk-statistics .risk-stat-card { padding: 28px; border: 1px solid var(--line); border-top: 4px solid #4056a1; border-radius: 12px; background: #fff; min-width: 0; }
+.risk-statistics .risk-stat-card h2 { margin: 0 0 12px; font-size: 19px; line-height: 1.5; overflow-wrap: anywhere; }
+.risk-statistics .risk-stat-chart { margin-top: 24px; }
+.risk-statistics .risk-stat-pie-layout { display: flex; align-items: center; flex-wrap: wrap; gap: 28px; }
+.risk-statistics .risk-stat-pie { width: 180px; height: 180px; border-radius: 50%; flex: 0 0 180px; }
+.risk-statistics .risk-stat-distribution { display: grid; gap: 16px; padding: 0; margin: 0; list-style: none; flex: 1 1 240px; min-width: 0; }
+.risk-statistics .risk-stat-label { display: flex; align-items: baseline; gap: 10px; font-size: 14px; overflow-wrap: anywhere; }
+.risk-statistics .risk-stat-label strong { margin-left: auto; flex-shrink: 0; font-size: 13px; }
+.risk-statistics .risk-stat-swatch { width: 12px; height: 12px; flex: 0 0 12px; border-radius: 3px; }
+.risk-statistics .risk-stat-track { height: 14px; margin-top: 7px; background: #edf0f7; border-radius: 4px; overflow: hidden; }
+.risk-statistics .risk-stat-bar { height: 100%; background: #4056a1; }
+.risk-statistics .risk-stat-text { max-height: 480px; overflow-y: auto; padding-left: 26px; }
+.risk-statistics .risk-stat-text li { padding: 14px 10px; border-bottom: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .risk-statistics .risk-stat-card { padding: 20px 16px; }
+  .risk-statistics .risk-stat-controls > button { flex: 1 1 140px; }
+  .risk-statistics .risk-stat-pie-layout { justify-content: center; }
+}

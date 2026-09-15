@@ -1,0 +1,8 @@
+.risk-qr-dialog { width: min(500px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: #fff; }
+.risk-qr-dialog::backdrop { background: rgb(15 25 40 / 55%); }
+.risk-qr-dialog h2 { font-size: 20px; overflow-wrap: anywhere; }
+.risk-qr-dialog canvas { display: block; max-width: 100%; height: auto; margin: 16px auto; image-rendering: pixelated; }
+.risk-qr-dialog canvas[hidden], .risk-qr-dialog a[hidden] { display: none; }
+.risk-qr-dialog .risk-qr-url { display: block; overflow-wrap: anywhere; font-size: 13px; }
+.risk-qr-dialog p { font-size: 13px; line-height: 1.7; }
+.risk-qr-dialog .risk-qr-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }

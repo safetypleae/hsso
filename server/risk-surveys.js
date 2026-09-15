@@ -1,5 +1,10 @@
 import { json, errorResponse } from './auth-session.js';
 import { authenticate } from './documents.js';
+import { extensionsAvailable, surveyExtension, validDefinition, normalizeAnswers } from './risk-model.js';
+import { readMultipart, uploadPhotos, discardPhotos, photoStatements, cleanupPhotos } from './risk-photos.js';
+import { visibleQuestion } from '../assets/risk/schema.js';
+
+export { SELECT_RESPONSE, responseView };
 
 export const MAX_SURVEY_BODY_BYTES = 65536;
 export const MAX_RESPONSE_BODY_BYTES = 32768;
@@ -55,7 +60,7 @@ function validQuestions(questions) {
 }
 
 function validSurvey(input) {
-  return object(input) && string(input.title, 200, true) && string(input.target, 300, true) && string(input.guidance, 5000) && validDates(input.startDate, input.endDate) && validSettings(input.settings) && validQuestions(input.questions) && boolean(input.isActive);
+  return object(input) && string(input.title, 200, true) && string(input.target, 300, true) && string(input.guidance, 5000) && validDates(input.startDate, input.endDate) && validSettings(input.settings) && validQuestions(input.questions) && boolean(input.isActive) && (input.schemaVersion === undefined || validDefinition(input));
 }
 
 function randomToken() {
@@ -82,6 +87,10 @@ function surveyView(row, includeToken = true) {
 
 const SELECT_SURVEY = 'SELECT id,owner_user_id AS ownerUserId,public_token AS publicToken,title,target,start_date AS startDate,end_date AS endDate,guidance,settings_json AS settingsJson,questions_json AS questionsJson,is_active AS isActive,created_at AS createdAt,updated_at AS updatedAt';
 
+async function extendedSurvey(env, row, token = true) {
+  return { ...surveyView(row, token), ...await surveyExtension(env, row.id, JSON.parse(row.questionsJson)) };
+}
+
 export async function surveyCollection({ request, env }) {
   const rejected = methodGuard(request, ['GET','POST'], ['POST']); if (rejected) return rejected;
   try {
@@ -89,32 +98,63 @@ export async function surveyCollection({ request, env }) {
     if (request.method === 'POST') {
       let input; try { input = await body(request, MAX_SURVEY_BODY_BYTES); } catch (error) { return bodyError(error); }
       if (!validSurvey(input)) return errorResponse('INVALID_SURVEY', 400);
+      if (input.schemaVersion === 2 && !await extensionsAvailable(env)) return errorResponse('MIGRATION_REQUIRED', 503);
       const id = crypto.randomUUID(), publicToken = randomToken(), now = new Date().toISOString();
-      const result = await env.DB.prepare('INSERT INTO risk_surveys (id,owner_user_id,public_token,title,target,start_date,end_date,guidance,settings_json,questions_json,is_active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-        .bind(id, owner, publicToken, input.title.trim(), input.target.trim(), input.startDate, input.endDate, input.guidance, JSON.stringify(input.settings), JSON.stringify(input.questions), input.isActive ? 1 : 0, now, now).run();
+      const insert = env.DB.prepare('INSERT INTO risk_surveys (id,owner_user_id,public_token,title,target,start_date,end_date,guidance,settings_json,questions_json,is_active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .bind(id, owner, publicToken, input.title.trim(), input.target.trim(), input.startDate, input.endDate, input.guidance, JSON.stringify(input.settings), JSON.stringify(input.questions), input.isActive ? 1 : 0, now, now);
+      const result = input.schemaVersion === 2 ? (await env.DB.batch([insert,
+        env.DB.prepare('INSERT INTO risk_survey_metadata (survey_id,company_name,departments_json,revision) VALUES (?,?,?,1)').bind(id, input.companyName.trim(), JSON.stringify(input.departments)),
+        env.DB.prepare('INSERT INTO risk_survey_versions (survey_id,revision,definition_json) VALUES (?,1,?)').bind(id, JSON.stringify(input))
+      ]))[0] : await insert.run();
       if (!result.success || result.meta?.changes !== 1) throw new Error('insert');
       return json({ ok: true, survey: { id, publicToken, title: input.title.trim(), isActive: input.isActive, status: statusFor({ isActive: input.isActive, startDate: input.startDate, endDate: input.endDate }), createdAt: now } }, 201);
     }
     const rows = await env.DB.prepare(`${SELECT_SURVEY},(SELECT COUNT(*) FROM risk_responses r WHERE r.survey_id=risk_surveys.id) AS responseCount FROM risk_surveys WHERE owner_user_id=? ORDER BY created_at DESC,id DESC`).bind(owner).all();
-    const surveys = rows.results.map(surveyView);
+    const surveys = await Promise.all(rows.results.map(row => extendedSurvey(env, row)));
     return json({ ok: true, surveys, summary: { total: surveys.length, active: surveys.filter(v => v.status === 'active').length, ended: surveys.filter(v => ['ended','inactive'].includes(v.status)).length, responses: surveys.reduce((sum, v) => sum + v.responseCount, 0) }, serverDateKst: kstToday() });
   } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
 }
 
 export async function surveyItem({ request, env, params }) {
-  const rejected = methodGuard(request, ['GET','PATCH'], ['PATCH']); if (rejected) return rejected;
+  const rejected = methodGuard(request, ['GET','PATCH','DELETE'], ['PATCH','DELETE']); if (rejected) return rejected;
   try {
     const owner = await authenticate(request, env); if (!owner) return errorResponse('UNAUTHENTICATED', 401);
     if (!UUID.test(params.id || '')) return errorResponse('NOT_FOUND', 404);
+    const existing = await env.DB.prepare(`${SELECT_SURVEY} FROM risk_surveys WHERE id=? AND owner_user_id=?`).bind(params.id, owner).first();
+    if (!existing) return errorResponse('NOT_FOUND', 404);
+    if (request.method === 'DELETE') {
+      let input; try { input = await body(request, MAX_SURVEY_BODY_BYTES); } catch (error) { return bodyError(error); }
+      if (input?.confirmTitle !== existing.title) return errorResponse('CONFIRMATION_REQUIRED', 400);
+      const statements = [];
+      if (await extensionsAvailable(env)) statements.push(env.DB.prepare('INSERT OR REPLACE INTO risk_photo_deletions (object_key,ready_after) SELECT object_key,? FROM risk_response_photos WHERE survey_id=?').bind(new Date().toISOString(), params.id));
+      statements.push(env.DB.prepare('DELETE FROM risk_surveys WHERE id=? AND owner_user_id=?').bind(params.id, owner));
+      await env.DB.batch(statements);
+      try { await cleanupPhotos(env); } catch { /* Scheduled worker retries durable deletion jobs. */ }
+      return json({ ok: true });
+    }
     if (request.method === 'PATCH') {
       let input; try { input = await body(request, MAX_SURVEY_BODY_BYTES); } catch (error) { return bodyError(error); }
+      if (input?.schemaVersion === 2) {
+        if (!validSurvey(input)) return errorResponse('INVALID_SURVEY', 400);
+        if (!await extensionsAvailable(env)) return errorResponse('MIGRATION_REQUIRED', 503);
+        const current = await extendedSurvey(env, existing);
+        if (input.revision !== current.revision) return errorResponse('SURVEY_CHANGED', 409);
+        const revision = current.revision + 1;
+        try { await env.DB.batch([
+          env.DB.prepare('INSERT OR IGNORE INTO risk_survey_versions (survey_id,revision,definition_json) VALUES (?,?,?)').bind(params.id, current.revision, JSON.stringify(current)),
+          env.DB.prepare('INSERT INTO risk_survey_versions (survey_id,revision,definition_json) VALUES (?,?,?)').bind(params.id, revision, JSON.stringify(input)),
+          env.DB.prepare('INSERT INTO risk_survey_metadata (survey_id,company_name,departments_json,revision) VALUES (?,?,?,?) ON CONFLICT(survey_id) DO UPDATE SET company_name=excluded.company_name,departments_json=excluded.departments_json,revision=excluded.revision').bind(params.id, input.companyName.trim(), JSON.stringify(input.departments), revision),
+          env.DB.prepare('UPDATE risk_surveys SET title=?,target=?,start_date=?,end_date=?,guidance=?,settings_json=?,questions_json=?,is_active=?,updated_at=? WHERE id=? AND owner_user_id=?').bind(input.title.trim(), input.target.trim(), input.startDate, input.endDate, input.guidance, JSON.stringify(input.settings), JSON.stringify(input.questions), input.isActive ? 1 : 0, new Date().toISOString(), params.id, owner)
+        ]); } catch (error) { if (/UNIQUE|constraint/i.test(error.message)) return errorResponse('SURVEY_CHANGED', 409); throw error; }
+      } else {
       if (!object(input) || Object.keys(input).length !== 1 || !boolean(input.isActive)) return errorResponse('INVALID_UPDATE', 400);
       const result = await env.DB.prepare('UPDATE risk_surveys SET is_active=?,updated_at=? WHERE id=? AND owner_user_id=?').bind(input.isActive ? 1 : 0, new Date().toISOString(), params.id, owner).run();
       if (!result.success) throw new Error('update');
       if (result.meta?.changes !== 1) return errorResponse('NOT_FOUND', 404);
+      }
     }
     const row = await env.DB.prepare(`${SELECT_SURVEY},(SELECT COUNT(*) FROM risk_responses r WHERE r.survey_id=risk_surveys.id) AS responseCount FROM risk_surveys WHERE id=? AND owner_user_id=?`).bind(params.id, owner).first();
-    return row ? json({ ok: true, survey: surveyView(row) }) : errorResponse('NOT_FOUND', 404);
+    return row ? json({ ok: true, survey: await extendedSurvey(env, row) }) : errorResponse('NOT_FOUND', 404);
   } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
 }
 
@@ -136,7 +176,8 @@ export async function publicSurvey({ request, env, params }) {
   try {
     const row = await publicRow(env, params.token); if (!row) return errorResponse('NOT_FOUND', 404);
     const unavailable = publicAvailability(row); if (unavailable) return errorResponse(...unavailable);
-    const survey = surveyView(row, false); delete survey.id; delete survey.createdAt; delete survey.updatedAt;
+    const survey = await extendedSurvey(env, row, false); delete survey.id; delete survey.createdAt; delete survey.updatedAt;
+    survey.photoUploadAvailable = Boolean(env.RISK_PHOTOS) && await extensionsAvailable(env);
     return json({ ok: true, survey, serverDateKst: kstToday() });
   } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
 }
@@ -160,8 +201,15 @@ export async function publicResponses({ request, env, params }) {
   try {
     const row = await publicRow(env, params.token); if (!row) return errorResponse('NOT_FOUND', 404);
     const unavailable = publicAvailability(row); if (unavailable) return errorResponse(...unavailable);
-    let input; try { input = await body(request, MAX_RESPONSE_BODY_BYTES); } catch (error) { return bodyError(error); }
-    const settings = JSON.parse(row.settingsJson); if (!validResponse(input, settings)) return errorResponse('INVALID_RESPONSE', 400);
+    let input, files = [];
+    try {
+      if (request.headers.get('Content-Type')?.startsWith('multipart/form-data')) ({ input, files } = await readMultipart(request));
+      else input = await body(request, MAX_RESPONSE_BODY_BYTES);
+    } catch (error) { return bodyError(error); }
+    const settings = JSON.parse(row.settingsJson), definition = await surveyExtension(env, row.id, JSON.parse(row.questionsJson));
+    if (input?.schemaVersion === 2) return submitDefinedResponse(env, row, definition, settings, input, files);
+    if (definition.schemaVersion === 2) return errorResponse('SURVEY_CHANGED', 409);
+    if (files.length || !validResponse(input, settings)) return errorResponse('INVALID_RESPONSE', 400);
     const anonymous = input.isAnonymous;
     const employeeId = anonymous ? null : (input.employeeId || '').trim() || null;
     if (!settings.allowDuplicates && settings.collectEmployeeId && employeeId) {
@@ -177,10 +225,38 @@ export async function publicResponses({ request, env, params }) {
   } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
 }
 
-function responseView(row) {
-  return { id: row.id, submittedAt: row.submittedAt, isAnonymous: Boolean(row.isAnonymous), respondentName: row.isAnonymous ? null : row.respondentName, department: row.isAnonymous ? null : row.department, employeeId: row.isAnonymous ? null : row.employeeId, hasHazard: Boolean(row.hasHazard), hazardTypes: JSON.parse(row.hazardTypesJson || '[]'), hazardDescription: row.hazardDescription, location: row.location, preLikelihood: row.preLikelihood, preSeverity: row.preSeverity, preRiskScore: row.preRiskScore, improvementSuggestion: row.improvementSuggestion, postLikelihood: row.postLikelihood, postSeverity: row.postSeverity, postRiskScore: row.postRiskScore, safeReason: row.safeReason };
+async function submitDefinedResponse(env, row, definition, settings, input, files) {
+  let photos = [];
+  try {
+    const normalized = normalizeAnswers(input, definition, settings, files.length);
+    if (files.length && !definition.questions.some(q => q.type === 'photo' && visibleQuestion(q, definition.questions, input.answers, settings))) return errorResponse('PHOTO_NOT_ALLOWED', 400);
+    if (!settings.allowDuplicates && normalized.employeeId) {
+      const duplicate = await env.DB.prepare('SELECT id FROM risk_responses WHERE survey_id=? AND employee_id=? LIMIT 1').bind(row.id, normalized.employeeId).first();
+      if (duplicate) return errorResponse('DUPLICATE_RESPONSE', 409);
+    }
+    const id = crypto.randomUUID(), submittedAt = new Date().toISOString();
+    photos = await uploadPhotos(env, row.id, id, files);
+    normalized.photos = photos.map(({ id, type, size }) => ({ id, type, size }));
+    const insert = env.DB.prepare('INSERT INTO risk_responses (id,survey_id,respondent_name,department,employee_id,is_anonymous,has_hazard,hazard_types_json,hazard_description,location,pre_likelihood,pre_severity,pre_risk_score,improvement_suggestion,post_likelihood,post_severity,post_risk_score,safe_reason,response_data,submitted_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT id FROM risk_surveys WHERE id=? AND updated_at=? AND is_active=1)')
+      .bind(id,row.id,normalized.respondentName,normalized.department,normalized.employeeId,normalized.isAnonymous?1:0,normalized.hasHazard?1:0,JSON.stringify(normalized.hazardTypes),normalized.hazardDescription,normalized.location,normalized.preLikelihood,normalized.preSeverity,normalized.preRiskScore,normalized.improvementSuggestion,normalized.postLikelihood,normalized.postSeverity,normalized.postRiskScore,normalized.safeReason,JSON.stringify(normalized),submittedAt,row.id,row.updatedAt);
+    const result = (await env.DB.batch([insert, ...photoStatements(env, row.id, id, photos)]))[0];
+    if (result.meta?.changes !== 1) throw new Error('SURVEY_CHANGED');
+    return json({ ok: true, submittedAt }, 201);
+  } catch (error) {
+    await discardPhotos(env, photos);
+    if (['SURVEY_CHANGED','DUPLICATE_RESPONSE'].includes(error.message)) return errorResponse(error.message, 409);
+    if (error.message === 'PHOTO_STORAGE_UNAVAILABLE') return errorResponse(error.message, 503);
+    if (['INVALID_RESPONSE','INVALID_DEPARTMENT','INVALID_PHOTO','PHOTO_REQUIRED'].includes(error.message)) return errorResponse(error.message, 400);
+    return errorResponse('INTERNAL_SERVER_ERROR', 500);
+  }
 }
-const SELECT_RESPONSE = 'SELECT r.id,r.respondent_name AS respondentName,r.department,r.employee_id AS employeeId,r.is_anonymous AS isAnonymous,r.has_hazard AS hasHazard,r.hazard_types_json AS hazardTypesJson,r.hazard_description AS hazardDescription,r.location,r.pre_likelihood AS preLikelihood,r.pre_severity AS preSeverity,r.pre_risk_score AS preRiskScore,r.improvement_suggestion AS improvementSuggestion,r.post_likelihood AS postLikelihood,r.post_severity AS postSeverity,r.post_risk_score AS postRiskScore,r.safe_reason AS safeReason,r.submitted_at AS submittedAt';
+
+function responseView(row) {
+  const raw = JSON.parse(row.responseData || '{}');
+  const extra = raw.schemaVersion === 2 ? { answers: raw.answers, questionSnapshot: raw.questionSnapshot, revision: raw.revision, photos: raw.photos || [] } : { photos: [] };
+  return { ...extra, id: row.id, submittedAt: row.submittedAt, isAnonymous: Boolean(row.isAnonymous), respondentName: row.isAnonymous ? null : row.respondentName, department: row.isAnonymous ? null : row.department, employeeId: row.isAnonymous ? null : row.employeeId, hasHazard: raw.schemaVersion === 2 ? raw.hasHazard : Boolean(row.hasHazard), hazardTypes: JSON.parse(row.hazardTypesJson || '[]'), hazardDescription: row.hazardDescription, location: row.location, preLikelihood: row.preLikelihood, preSeverity: row.preSeverity, preRiskScore: row.preRiskScore, improvementSuggestion: row.improvementSuggestion, postLikelihood: row.postLikelihood, postSeverity: row.postSeverity, postRiskScore: row.postRiskScore, safeReason: row.safeReason };
+}
+const SELECT_RESPONSE = 'SELECT r.id,r.response_data AS responseData,r.respondent_name AS respondentName,r.department,r.employee_id AS employeeId,r.is_anonymous AS isAnonymous,r.has_hazard AS hasHazard,r.hazard_types_json AS hazardTypesJson,r.hazard_description AS hazardDescription,r.location,r.pre_likelihood AS preLikelihood,r.pre_severity AS preSeverity,r.pre_risk_score AS preRiskScore,r.improvement_suggestion AS improvementSuggestion,r.post_likelihood AS postLikelihood,r.post_severity AS postSeverity,r.post_risk_score AS postRiskScore,r.safe_reason AS safeReason,r.submitted_at AS submittedAt';
 
 export async function adminResponses({ request, env, params }) {
   const rejected = methodGuard(request, ['GET']); if (rejected) return rejected;

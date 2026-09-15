@@ -1,3 +1,8 @@
+import { mountRiskStatistics } from './assets/risk/statistics.js';
+import { createSurveyQrButton } from './assets/risk/qr.js';
+import { mountSurveyEditor } from './assets/risk/builder.js';
+import { appendResponseExtras, confirmSurveyDeletion } from './assets/risk/response-details.js';
+
 const TYPES = { warning_label: '경고표지', process_guide: '작업공정별 관리요령' };
 const $ = selector => document.querySelector(selector);
 const el = (tag, text, className = '') => Object.assign(document.createElement(tag), { textContent: text, className });
@@ -63,13 +68,17 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
     const list=el('div','','my-document-list');
     for(const survey of surveys) { const row=el('article','','my-document-row my-risk-row'), name=el('div','','my-document-name'); name.append(el('span',RISK_STATUS[survey.status]||survey.status,'my-secondary'),el('h3',survey.title),el('p',survey.target,'my-secondary'));
       const meta=el('div','','my-document-meta'); meta.append(el('span',`${survey.startDate} ~ ${survey.endDate}`),el('span',`응답 ${survey.responseCount}건`),el('span',`생성일 ${date(survey.createdAt)}`));
-      const actions=el('div','','my-actions'); actions.append(copyButton(survey.publicToken),button('관리',()=>riskDetail(survey.id))); row.append(name,meta,actions); list.append(row); }
+      const actions=el('div','','my-actions'); actions.append(copyButton(survey.publicToken),createSurveyQrButton(survey),button('관리',()=>riskDetail(survey.id)),button('통계 보기',()=>riskStatistics(survey.id))); row.append(name,meta,actions); list.append(row); }
     return list;
   }
   async function riskWorkspace(data) {
     heading('위험성평가','설문 진행 상태와 근로자 응답을 관리합니다.');
     const actions=el('div','','my-actions'); const create=button('+ 새 설문 만들기',()=>navigate('risk-survey-create')); create.className='primary-button'; actions.append(create); content.append(actions,riskSummary(data));
     if(data.surveys.length) content.append(riskRows(data.surveys)); else { const empty=el('section','','my-empty'); empty.append(el('h2','아직 저장된 위험성평가가 없습니다.'),el('p','새 설문을 만들면 공개 링크와 응답 관리 화면이 생성됩니다.')); content.append(empty); }
+  }
+  function riskStatistics(id) {
+    const version = ++generation; clearContent(); status.textContent = '';
+    disposePreview = mountRiskStatistics(content, { id, back: () => riskDetail(id), isCurrent: () => version === generation && !root.hidden, loginRequired });
   }
   async function riskDetail(id) {
     const version=++generation; clearContent(); status.textContent='설문을 불러오는 중입니다.';
@@ -78,6 +87,10 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
       const info=el('dl','','my-profile'); for(const [label,value] of [['상태',RISK_STATUS[survey.status]],['안내',survey.guidance],['응답 수',`${survey.responseCount}건`],['공유 링크',publicUrl(survey.publicToken)]]) { info.append(el('dt',label),el('dd',value)); } content.append(info);
       const actions=el('div','','my-actions'); actions.append(copyButton(survey.publicToken)); const toggle=button(survey.isActive?'비활성으로 전환':'활성으로 전환',async()=>{toggle.disabled=true;try{await api('/api/risk-surveys/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({isActive:!survey.isActive})});await riskDetail(id);}catch{toggle.disabled=false;status.textContent='상태를 변경하지 못했습니다.';}}); actions.append(toggle);
       const download=document.createElement('a'); download.className='secondary-button'; download.textContent='응답 다운로드'; download.href=`/api/risk-surveys/${encodeURIComponent(id)}/responses.csv`; actions.append(download); content.append(actions,el('h2','응답 목록'));
+      actions.append(button('통계 보기',()=>riskStatistics(id)));
+      actions.append(createSurveyQrButton(survey));
+      actions.append(button('설문 수정',()=>{const version=++generation;clearContent();status.textContent='';disposePreview=mountSurveyEditor(content,{survey,back:()=>riskDetail(id),saved:()=>riskDetail(id),loginRequired,isCurrent:()=>version===generation&&!root.hidden});}));
+      actions.append(button('설문 삭제',()=>confirmSurveyDeletion(survey,{deleted:()=>{current='risk';load();},loginRequired})));
       renderResponses(id,responseData,0);
     } catch(error){fail(error,version);}
   }
@@ -87,7 +100,7 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
     const pages=el('div','','my-actions');if(responseOffset)pages.append(button('이전',async()=>{const next=Math.max(0,responseOffset-20);renderResponsePage(surveyId,next);}));if(data.hasMore)pages.append(button('다음',()=>renderResponsePage(surveyId,responseOffset+20)));content.append(pages);
   }
   async function renderResponsePage(id,next){await riskDetail(id); if(next){const data=await api(`/api/risk-surveys/${encodeURIComponent(id)}/responses?limit=20&offset=${next}`); const list=content.querySelector('.my-document-list:last-of-type');list?.nextElementSibling?.remove();list?.remove();renderResponses(id,data,next);}}
-  async function riskResponseDetail(surveyId,responseId){const version=++generation;clearContent();status.textContent='응답을 불러오는 중입니다.';try{const {response}=await api(`/api/risk-surveys/${encodeURIComponent(surveyId)}/responses/${encodeURIComponent(responseId)}`);if(version!==generation||root.hidden)return;status.textContent='';content.append(button('← 설문 상세로 돌아가기',()=>riskDetail(surveyId)));heading('응답 상세',`제출일 ${date(response.submittedAt)}`);const fields=[['이름',response.isAnonymous?'익명':response.respondentName],['부서',response.isAnonymous?null:response.department],['사번',response.isAnonymous?null:response.employeeId],['위험요인 여부',response.hasHazard?'있음':'없음'],['위험유형',response.hazardTypes.join(', ')],['위험상황',response.hazardDescription],['작업장소',response.location],['개선 전 위험성',response.preRiskScore==null?null:`발생가능성 ${response.preLikelihood} × 중대성 ${response.preSeverity} = ${response.preRiskScore}`],['개선의견',response.improvementSuggestion],['개선 후 예상 위험성',response.postRiskScore==null?null:`발생가능성 ${response.postLikelihood} × 중대성 ${response.postSeverity} = ${response.postRiskScore}`],['안전 사유',response.safeReason]];const info=el('dl','','my-profile my-response-detail');for(const [label,value] of fields.filter(([,value])=>value!==null&&value!=='')){info.append(el('dt',label),el('dd',value));}content.append(info);}catch(error){fail(error,version);}}
+  async function riskResponseDetail(surveyId,responseId){const version=++generation;clearContent();status.textContent='응답을 불러오는 중입니다.';try{const {response}=await api(`/api/risk-surveys/${encodeURIComponent(surveyId)}/responses/${encodeURIComponent(responseId)}`);if(version!==generation||root.hidden)return;status.textContent='';content.append(button('← 설문 상세로 돌아가기',()=>riskDetail(surveyId)));heading('응답 상세',`제출일 ${date(response.submittedAt)}`);const fields=[['이름',response.isAnonymous?'익명':response.respondentName],['부서',response.isAnonymous?null:response.department],['사번',response.isAnonymous?null:response.employeeId],['위험요인 여부',response.hasHazard?'있음':'없음'],['위험유형',response.hazardTypes.join(', ')],['위험상황',response.hazardDescription],['작업장소',response.location],['개선 전 위험성',response.preRiskScore==null?null:`발생가능성 ${response.preLikelihood} × 중대성 ${response.preSeverity} = ${response.preRiskScore}`],['개선의견',response.improvementSuggestion],['개선 후 예상 위험성',response.postRiskScore==null?null:`발생가능성 ${response.postLikelihood} × 중대성 ${response.postSeverity} = ${response.postRiskScore}`],['안전 사유',response.safeReason]];const info=el('dl','','my-profile my-response-detail');for(const [label,value] of fields.filter(([,value])=>value!==null&&value!=='')){info.append(el('dt',label),el('dd',value));}content.append(info);appendResponseExtras(content,surveyId,response);}catch(error){fail(error,version);}}
   function renderProfile(editing = false, notice = '') {
     const version = ++generation;
     clearContent(); status.textContent = notice;

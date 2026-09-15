@@ -1,0 +1,8 @@
+{
+  "name": "hsso-risk-photo-cleanup",
+  "main": "risk-photo-cleanup.js",
+  "compatibility_date": "2026-09-11",
+  "triggers": { "crons": ["0 * * * *"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "REPLACE_ME", "database_id": "REPLACE_ME" }],
+  "r2_buckets": [{ "binding": "RISK_PHOTOS", "bucket_name": "REPLACE_ME_PRIVATE_BUCKET" }]
+}
