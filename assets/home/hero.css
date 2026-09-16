@@ -499,4 +499,6 @@ body:has(#home:not([hidden])) .header-account { margin-left: auto; }
   html:has(.home-view:not([hidden])) { scroll-snap-type: none; scroll-padding-top: 0; }
   .home-view .portal-screen { scroll-snap-align: none; }
   .site-footer { scroll-snap-align: none; }
+  .portal-screen-primary .portal-first-grid { display: grid; grid-template-columns: clamp(300px,23vw,340px) clamp(370px,30vw,430px); justify-content: center; align-items: end; column-gap: 24px; box-sizing: border-box; padding-bottom: 92px; }
+  .portal-screen-primary .portal-floating-notice, .portal-screen-primary .portal-recent { position: static; width: auto; height: 184px !important; transform: none; }
 }
