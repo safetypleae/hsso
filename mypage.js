@@ -12,6 +12,7 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
   const root = $('#mypage'); const content = $('#my-content'); const status = $('#my-status');
   let generation = 0; let current = 'dashboard'; let user; let role; let offset = 0;
   let filters = { type: '', period: '90', q: '' };
+  const latestInviteLinks = new Map();
   let pendingDelete; let opener;
   const dialog = $('#my-delete-dialog');
   let disposePreview = () => {};
@@ -177,11 +178,28 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
   async function renderCompanyWorkspace() {
     const version = ++generation; clearContent(); status.textContent = '회사·권한 정보를 불러오는 중입니다.';
     try {
-      const [applicationData, companyData, operatorData] = await Promise.all([
-        api('/api/company-admin-applications'), api('/api/companies'), role === 'admin' ? api('/api/admin/company-admin-applications?limit=100') : Promise.resolve(null)
+      const inviteToken = new URLSearchParams(location.search).get('companyInvite');
+      const [applicationData, companyData, permissionData, operatorData, receivedInvite] = await Promise.all([
+        api('/api/company-admin-applications'), api('/api/companies'), api('/api/company-permissions'), role === 'admin' ? api('/api/admin/company-admin-applications?limit=100') : Promise.resolve(null),
+        inviteToken ? api('/api/company-invitations/' + encodeURIComponent(inviteToken)).catch(error => ({ error })) : Promise.resolve(null)
       ]);
       if (version !== generation || root.hidden) return;
       status.textContent = ''; heading('회사·권한 관리', '회사 관리자 신청과 연결된 회사 워크스페이스를 관리합니다.');
+      if (inviteToken) {
+        const received = el('section', '', 'my-company-section'); received.append(el('h2', '받은 담당자 초대'));
+        if (receivedInvite?.error) {
+          received.append(el('p', receivedInvite.error.status === 403 ? '현재 로그인한 이메일과 초대 이메일이 일치하지 않습니다.' : receivedInvite.error.status === 409 ? '만료되었거나 더 이상 사용할 수 없는 초대입니다.' : '초대 정보를 확인할 수 없습니다.', 'my-profile-error'));
+        } else if (receivedInvite?.invitation) {
+          const item = receivedInvite.invitation;
+          received.append(el('p', `${item.companyName} · ${item.departmentName}`), el('p', `업무 권한: MSDS 관리 · 상태: ${item.status === 'pending' ? '수락 가능' : item.status}`, 'my-secondary'));
+          if (item.status === 'pending') {
+            const accept = el('button', '초대 수락', 'primary-button'); accept.type = 'button';
+            accept.addEventListener('click', async () => { accept.disabled = true; try { await api('/api/company-invitations/' + encodeURIComponent(inviteToken), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); const url = new URL(location.href); url.searchParams.delete('companyInvite'); history.replaceState(history.state, '', url); await renderCompanyWorkspace(); } catch (error) { status.textContent = error.status === 403 ? '초대 이메일과 로그인 이메일이 일치하지 않습니다.' : '초대를 수락하지 못했습니다.'; accept.disabled = false; } });
+            received.append(accept);
+          }
+        }
+        content.append(received);
+      }
       const applicationSection = el('section', '', 'my-company-section'); applicationSection.append(el('h2', '최초 회사 관리자 신청'));
       if (applicationData.applications.length) {
         const list = el('div');
@@ -213,8 +231,18 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
       if (!companyData.companies.length) connected.append(el('p', '연결된 회사 워크스페이스가 없습니다.', 'my-secondary'));
       for (const company of companyData.companies) {
         const card = el('article', '', 'my-company-card'); card.append(el('h2', company.name), el('p', `내 권한: ${company.role === 'company_admin' ? '회사 관리자' : '구성원'} · 회사 상태: ${COMPANY_STATUS[company.status] || company.status}`, 'my-secondary'));
+        const mine = permissionData.permissions.filter(permission => permission.companyId === company.id && permission.status === 'active');
+        if (company.role !== 'company_admin' && mine.length) {
+          const assignments = el('div', '', 'my-company-section'); assignments.append(el('h3', '내 담당 업무'));
+          for (const permission of mine) assignments.append(el('p', `${permission.departmentName} · MSDS 관리 · 활성`));
+          card.append(assignments);
+        }
         if (company.role === 'company_admin' && company.membershipStatus === 'active') {
-          const departmentData = await api(`/api/companies/${encodeURIComponent(company.id)}/departments`);
+          const [departmentData, invitationData, memberData] = await Promise.all([
+            api(`/api/companies/${encodeURIComponent(company.id)}/departments`),
+            api(`/api/companies/${encodeURIComponent(company.id)}/invitations`),
+            api(`/api/companies/${encodeURIComponent(company.id)}/members`)
+          ]);
           if (version !== generation || root.hidden) return;
           const list = el('div'); list.append(el('h3', '부서 목록'));
           for (const department of departmentData.departments) {
@@ -229,6 +257,48 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
           const add = el('form', '', 'my-company-form'), addName = formField(add, 'name', '새 부서명', '', { maxLength: 100 }), addButton = el('button', '부서 추가', 'primary-button'); addButton.type = 'submit'; add.append(addButton);
           add.addEventListener('submit', async event => { event.preventDefault(); addButton.disabled = true; try { await api(`/api/companies/${encodeURIComponent(company.id)}/departments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: addName.value }) }); await renderCompanyWorkspace(); } catch (error) { status.textContent = error.status === 409 ? '같은 이름의 부서가 이미 있습니다.' : '부서를 추가하지 못했습니다.'; addButton.disabled = false; } });
           card.append(list, add);
+
+          const membersSection = el('section', '', 'my-company-section'); membersSection.append(el('h3', '회사 구성원'));
+          for (const member of memberData.members) {
+            const memberCard = el('article', '', 'my-application-card');
+            memberCard.append(el('h3', `${member.name} · ${member.email}`), el('p', `${member.role === 'company_admin' ? '회사 관리자 · 회사 전체 관리' : '부서 담당자'} · ${member.status === 'active' ? '활성' : member.status}`, 'my-secondary'));
+            for (const assignment of member.assignments) {
+              const row = el('div', '', 'my-department-row'); row.append(el('span', assignment.departmentName), el('span', `MSDS 관리 · ${assignment.status === 'active' ? '활성' : '해제'}`));
+              if (assignment.status === 'active') {
+                const revoke = el('button', '권한 해제', 'secondary-button'); revoke.type = 'button';
+                revoke.addEventListener('click', async () => { revoke.disabled = true; try { await api(`/api/companies/${encodeURIComponent(company.id)}/permissions/${encodeURIComponent(assignment.id)}`, { method: 'DELETE' }); await renderCompanyWorkspace(); } catch { status.textContent = '업무 권한을 해제하지 못했습니다.'; revoke.disabled = false; } });
+                row.append(revoke);
+              }
+              memberCard.append(row);
+            }
+            membersSection.append(memberCard);
+          }
+          card.append(membersSection);
+
+          const inviteSection = el('section', '', 'my-company-section'); inviteSection.append(el('h3', '담당자 초대'));
+          const activeDepartments = departmentData.departments.filter(department => department.status === 'active');
+          if (activeDepartments.length) {
+            const inviteForm = el('form', '', 'my-company-form'), emailLabel = el('label', '초대 이메일'), email = document.createElement('input'), departmentLabel = el('label', '담당 부서'), department = document.createElement('select'), permissionLabel = el('label', '업무 권한'), permission = document.createElement('select');
+            email.type = 'email'; email.name = 'email'; email.maxLength = 254; email.required = true; emailLabel.append(email);
+            for (const item of activeDepartments) { const option = el('option', item.name); option.value = item.id; department.append(option); } departmentLabel.append(department);
+            const permissionOption = el('option', 'MSDS 관리'); permissionOption.value = 'msds_manage'; permission.append(permissionOption); permissionLabel.append(permission);
+            const inviteMessage = el('div', '', 'my-workspace-message'), submit = el('button', '초대 링크 생성', 'primary-button'); submit.type = 'submit'; inviteForm.append(emailLabel, departmentLabel, permissionLabel, inviteMessage, submit);
+            inviteForm.addEventListener('submit', async event => { event.preventDefault(); submit.disabled = true; inviteMessage.replaceChildren(); try { const result = await api(`/api/companies/${encodeURIComponent(company.id)}/invitations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.value, departmentId: department.value, permission: permission.value }) }); latestInviteLinks.set(result.invitation.id, location.origin + result.invitePath); await renderCompanyWorkspace(); } catch (error) { inviteMessage.textContent = error.status === 409 ? '동일한 대기 중 초대가 있거나 이미 회사 전체 권한을 가진 사용자입니다.' : '초대를 생성하지 못했습니다.'; submit.disabled = false; } });
+            inviteSection.append(inviteForm);
+          }
+          inviteSection.append(el('h3', '보낸 초대'));
+          if (!invitationData.invitations.length) inviteSection.append(el('p', '보낸 초대가 없습니다.', 'my-secondary'));
+          for (const invitation of invitationData.invitations) {
+            const inviteCard = el('article', '', 'my-application-card'), label = { pending: '대기', accepted: '수락', revoked: '취소', expired: '만료' }[invitation.status] || invitation.status;
+            inviteCard.append(el('h3', invitation.inviteeEmail), el('p', `${invitation.departmentName} · MSDS 관리 · ${label}`, 'my-secondary'), el('p', `생성일 ${date(invitation.createdAt)} · 만료일 ${date(invitation.expiresAt)}`, 'my-secondary'));
+            if (invitation.status === 'pending') {
+              const actions = el('div', '', 'my-actions'), link = latestInviteLinks.get(invitation.id);
+              if (link) { const copy = el('button', '초대 링크 복사', 'secondary-button'); copy.type = 'button'; copy.addEventListener('click', async () => { await navigator.clipboard.writeText(link); copy.textContent = '복사됨'; }); actions.append(copy); }
+              const revoke = el('button', '초대 취소', 'secondary-button'); revoke.type = 'button'; revoke.addEventListener('click', async () => { revoke.disabled = true; try { await api(`/api/companies/${encodeURIComponent(company.id)}/invitations/${encodeURIComponent(invitation.id)}`, { method: 'DELETE' }); latestInviteLinks.delete(invitation.id); await renderCompanyWorkspace(); } catch { status.textContent = '초대를 취소하지 못했습니다.'; revoke.disabled = false; } }); actions.append(revoke); inviteCard.append(actions);
+            }
+            inviteSection.append(inviteCard);
+          }
+          card.append(inviteSection);
         }
         connected.append(card);
       }
@@ -337,5 +407,5 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
       finally{trigger.disabled=false;}
     });
   }
-  return view=>{++generation;clearContent();$('#my-nav').hidden=true;status.textContent='';if(dialog.open)dialog.close();if(view==='mypage'){current='dashboard';offset=0;load();}};
+  return view=>{++generation;clearContent();$('#my-nav').hidden=true;status.textContent='';if(dialog.open)dialog.close();if(view==='mypage'){current=new URLSearchParams(location.search).has('companyInvite')?'company':'dashboard';offset=0;load();}};
 }

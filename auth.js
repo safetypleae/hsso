@@ -125,7 +125,7 @@ export function initAuthUI(navigate) {
       const data = await response.json().catch(() => null);
       if (response.status === 200 && data?.ok === true) {
         clearPasswords();
-        navigate('home');
+        navigate(new URLSearchParams(window.location.search).has('companyInvite') ? 'mypage' : 'home');
         const authenticated = await refreshSession();
         if (authenticated !== true) notify('로그인 상태를 확인할 수 없습니다. 다시 시도해주세요.');
       } else if (response.status === 401) {

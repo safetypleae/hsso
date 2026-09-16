@@ -44,7 +44,7 @@ async function sessionUser(request, env) {
   return userId ? { userId } : { response: errorResponse('UNAUTHENTICATED', 401) };
 }
 
-async function companyAdmin(request, env, companyId) {
+export async function requireCompanyAdmin(request, env, companyId) {
   const access = await sessionUser(request, env);
   if (access.response) return access;
   if (!UUID.test(companyId || '')) return { response: errorResponse('NOT_FOUND', 404) };
@@ -161,7 +161,7 @@ export async function rejectApplication({ request, env, params }) {
 export async function departments({ request, env, params }) {
   const rejected = guard(request, ['GET', 'POST'], ['POST']); if (rejected) return rejected;
   let access;
-  try { access = await companyAdmin(request, env, params.companyId); } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
+  try { access = await requireCompanyAdmin(request, env, params.companyId); } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
   if (access.response) return access.response;
   try {
     if (request.method === 'GET') {
@@ -185,7 +185,7 @@ export async function departments({ request, env, params }) {
 export async function departmentItem({ request, env, params }) {
   const rejected = guard(request, ['PATCH'], ['PATCH']); if (rejected) return rejected;
   let access;
-  try { access = await companyAdmin(request, env, params.companyId); } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
+  try { access = await requireCompanyAdmin(request, env, params.companyId); } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
   if (access.response) return access.response;
   if (!UUID.test(params.departmentId || '')) return errorResponse('NOT_FOUND', 404);
   try {
