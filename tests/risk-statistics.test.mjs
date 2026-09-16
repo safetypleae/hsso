@@ -51,14 +51,14 @@ test('statistics uses all responses, stored question order, branch denominators 
   const context = await seed(t, 25), result = await get(statistics, context);
   assert.equal(result.status, 200); assert.equal(result.data.total, 25);
   assert.deepEqual(result.data.questions.map(q => q.id), questions.map(q => q.id));
-  const [yes, hazards, description, location, before, improvement, after, photo, safe] = result.data.questions;
+  const [yes, hazards, description, location, before, improvement, after, safe] = result.data.questions;
   assert.deepEqual(yes.distribution, [{ label: '예', count: 24, percent: 96 }, { label: '아니오', count: 1, percent: 4 }]);
   assert.equal(hazards.answered, 24); assert.equal(hazards.distribution.find(v => v.label === '추락').percent, 100);
   assert.equal(hazards.distribution.find(v => v.label === '전기').count, 24);
   assert.equal(hazards.distribution.find(v => v.label === '화학물질').count, 0);
   assert.equal(description.answers.length, 24); assert.match(description.answers[0], /한글 <태그> & 줄바꿈\n원본 응답/);
   assert.equal(location.kind, 'text'); assert.equal(before.average, 20); assert.equal(after.average, 4);
-  assert.equal(improvement.answers.length, 24); assert.equal(photo.kind, 'photos'); assert.equal(safe.answered, 1);
+  assert.equal(improvement.answers.length, 24); assert.equal(safe.answered, 1);
   assert.equal(result.response.headers.get('cache-control'), 'no-store');
 });
 
@@ -66,7 +66,7 @@ test('department exact filter drives every statistic and preserves available opt
   const context = await seed(t);
   const result = await get(statistics, context, '?department=' + encodeURIComponent('BM오션'));
   assert.equal(result.data.total, 2); assert.equal(result.data.questions[0].distribution[0].percent, 50);
-  assert.equal(result.data.questions[2].answers.length, 1); assert.equal(result.data.questions[8].answered, 1);
+  assert.equal(result.data.questions[2].answers.length, 1); assert.equal(result.data.questions[7].answered, 1);
   assert.deepEqual(result.data.availableFilters.departments, ['BM오션', '다른 부서']);
   assert.equal((await get(statistics, context, '?department=BM')).data.total, 0);
   assert.equal((await get(statistics, context, '?department=' + encodeURIComponent("' OR 1=1 --"))).data.total, 0);
@@ -105,7 +105,7 @@ test('empty survey and empty department have zero counts and valid header-only w
     assert.equal(result.data.questions[4].average, null);
     const excel = await get(xlsx, context, query), files = unzipStored(await excel.response.arrayBuffer());
     const sheet = files.get('xl/worksheets/sheet1.xml');
-    assert.equal([...sheet.matchAll(/<row /g)].length, 1); assert.match(sheet, /autoFilter ref="A1:T1"/);
+    assert.equal([...sheet.matchAll(/<row /g)].length, 1); assert.match(sheet, /autoFilter ref="A1:S1"/);
   }
 });
 

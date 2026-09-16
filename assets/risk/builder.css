@@ -4,10 +4,8 @@
 .risk-builder .risk-builder-row input { flex: 1 1 160px; min-width: 0; }
 .risk-builder .risk-builder-question { padding: 18px; border: 1px solid var(--line); border-radius: 10px; margin: 18px 0; }
 .risk-builder input:not([type=checkbox]), .risk-builder textarea, .risk-builder select, .risk-public-form input:not([type=checkbox]):not([type=radio]), .risk-public-form select, .risk-public-form textarea { box-sizing: border-box; max-width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 7px; font: inherit; }
-.risk-builder .risk-builder-question > input, .risk-builder .risk-builder-question > select { display: block; width: 100%; margin-bottom: 12px; }
+.risk-builder .risk-builder-question > input, .risk-builder .risk-builder-question > textarea, .risk-builder .risk-builder-question > select { display: block; width: 100%; margin-bottom: 12px; }
 .risk-public-form select, .risk-public-form textarea, .risk-public-form section > input { width: 100%; }
 .risk-public-form textarea { min-height: 120px; }
-.risk-photo-gallery { display: flex; flex-wrap: wrap; gap: 14px; }
-.risk-photo-gallery img { width: 180px; height: 140px; object-fit: contain; background: #f2f4f6; }
-.risk-photo-gallery a { overflow-wrap: anywhere; }
+.risk-public-form .risk-question-description { white-space: pre-wrap; }
 .risk-statistics .risk-stat-dimensions { display: grid; gap: 16px; margin: 18px 0; }

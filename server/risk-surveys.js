@@ -1,8 +1,6 @@
 import { json, errorResponse } from './auth-session.js';
 import { authenticate } from './documents.js';
 import { extensionsAvailable, surveyExtension, validDefinition, normalizeAnswers } from './risk-model.js';
-import { readMultipart, uploadPhotos, discardPhotos, photoStatements, cleanupPhotos } from './risk-photos.js';
-import { visibleQuestion } from '../assets/risk/schema.js';
 
 export { SELECT_RESPONSE, responseView };
 
@@ -52,11 +50,11 @@ function validDates(start, end) {
 }
 
 function validSettings(settings) {
-  return object(settings) && ['collectName','collectDepartment','collectEmployeeId','allowAnonymous','allowDuplicates','allowEdit','allowPhoto'].every(key => boolean(settings[key]));
+  return object(settings) && ['collectName','collectDepartment','collectEmployeeId','allowAnonymous','allowDuplicates','allowEdit'].every(key => boolean(settings[key]));
 }
 
 function validQuestions(questions) {
-  return Array.isArray(questions) && questions.length >= 1 && questions.length <= 30 && questions.every(q => object(q) && string(q.id, 50, true) && string(q.type, 30, true) && string(q.text, 500, true) && (!Object.hasOwn(q, 'options') || (Array.isArray(q.options) && q.options.length <= 30 && q.options.every(v => string(v, 100, true)))));
+  return Array.isArray(questions) && questions.length >= 1 && questions.length <= 30 && questions.every(q => object(q) && string(q.id, 50, true) && string(q.type, 30, true) && q.type !== 'photo' && string(q.text, 500, true) && string(q.description ?? '', 2000) && (!Object.hasOwn(q, 'options') || (Array.isArray(q.options) && q.options.length <= 30 && q.options.every(v => string(v, 100, true)))));
 }
 
 function validSurvey(input) {
@@ -125,11 +123,7 @@ export async function surveyItem({ request, env, params }) {
     if (request.method === 'DELETE') {
       let input; try { input = await body(request, MAX_SURVEY_BODY_BYTES); } catch (error) { return bodyError(error); }
       if (input?.confirmTitle !== existing.title) return errorResponse('CONFIRMATION_REQUIRED', 400);
-      const statements = [];
-      if (await extensionsAvailable(env)) statements.push(env.DB.prepare('INSERT OR REPLACE INTO risk_photo_deletions (object_key,ready_after) SELECT object_key,? FROM risk_response_photos WHERE survey_id=?').bind(new Date().toISOString(), params.id));
-      statements.push(env.DB.prepare('DELETE FROM risk_surveys WHERE id=? AND owner_user_id=?').bind(params.id, owner));
-      await env.DB.batch(statements);
-      try { await cleanupPhotos(env); } catch { /* Scheduled worker retries durable deletion jobs. */ }
+      await env.DB.prepare('DELETE FROM risk_surveys WHERE id=? AND owner_user_id=?').bind(params.id, owner).run();
       return json({ ok: true });
     }
     if (request.method === 'PATCH') {
@@ -177,7 +171,6 @@ export async function publicSurvey({ request, env, params }) {
     const row = await publicRow(env, params.token); if (!row) return errorResponse('NOT_FOUND', 404);
     const unavailable = publicAvailability(row); if (unavailable) return errorResponse(...unavailable);
     const survey = await extendedSurvey(env, row, false); delete survey.id; delete survey.createdAt; delete survey.updatedAt;
-    survey.photoUploadAvailable = Boolean(env.RISK_PHOTOS) && await extensionsAvailable(env);
     return json({ ok: true, survey, serverDateKst: kstToday() });
   } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
 }
@@ -201,15 +194,11 @@ export async function publicResponses({ request, env, params }) {
   try {
     const row = await publicRow(env, params.token); if (!row) return errorResponse('NOT_FOUND', 404);
     const unavailable = publicAvailability(row); if (unavailable) return errorResponse(...unavailable);
-    let input, files = [];
-    try {
-      if (request.headers.get('Content-Type')?.startsWith('multipart/form-data')) ({ input, files } = await readMultipart(request));
-      else input = await body(request, MAX_RESPONSE_BODY_BYTES);
-    } catch (error) { return bodyError(error); }
+    let input; try { input = await body(request, MAX_RESPONSE_BODY_BYTES); } catch (error) { return bodyError(error); }
     const settings = JSON.parse(row.settingsJson), definition = await surveyExtension(env, row.id, JSON.parse(row.questionsJson));
-    if (input?.schemaVersion === 2) return submitDefinedResponse(env, row, definition, settings, input, files);
+    if (input?.schemaVersion === 2) return submitDefinedResponse(env, row, definition, settings, input);
     if (definition.schemaVersion === 2) return errorResponse('SURVEY_CHANGED', 409);
-    if (files.length || !validResponse(input, settings)) return errorResponse('INVALID_RESPONSE', 400);
+    if (!validResponse(input, settings)) return errorResponse('INVALID_RESPONSE', 400);
     const anonymous = input.isAnonymous;
     const employeeId = anonymous ? null : (input.employeeId || '').trim() || null;
     if (!settings.allowDuplicates && settings.collectEmployeeId && employeeId) {
@@ -225,35 +214,29 @@ export async function publicResponses({ request, env, params }) {
   } catch { return errorResponse('INTERNAL_SERVER_ERROR', 500); }
 }
 
-async function submitDefinedResponse(env, row, definition, settings, input, files) {
-  let photos = [];
+async function submitDefinedResponse(env, row, definition, settings, input) {
   try {
-    const normalized = normalizeAnswers(input, definition, settings, files.length);
-    if (files.length && !definition.questions.some(q => q.type === 'photo' && visibleQuestion(q, definition.questions, input.answers, settings))) return errorResponse('PHOTO_NOT_ALLOWED', 400);
+    const normalized = normalizeAnswers(input, definition, settings);
     if (!settings.allowDuplicates && normalized.employeeId) {
       const duplicate = await env.DB.prepare('SELECT id FROM risk_responses WHERE survey_id=? AND employee_id=? LIMIT 1').bind(row.id, normalized.employeeId).first();
       if (duplicate) return errorResponse('DUPLICATE_RESPONSE', 409);
     }
     const id = crypto.randomUUID(), submittedAt = new Date().toISOString();
-    photos = await uploadPhotos(env, row.id, id, files);
-    normalized.photos = photos.map(({ id, type, size }) => ({ id, type, size }));
     const insert = env.DB.prepare('INSERT INTO risk_responses (id,survey_id,respondent_name,department,employee_id,is_anonymous,has_hazard,hazard_types_json,hazard_description,location,pre_likelihood,pre_severity,pre_risk_score,improvement_suggestion,post_likelihood,post_severity,post_risk_score,safe_reason,response_data,submitted_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT id FROM risk_surveys WHERE id=? AND updated_at=? AND is_active=1)')
       .bind(id,row.id,normalized.respondentName,normalized.department,normalized.employeeId,normalized.isAnonymous?1:0,normalized.hasHazard?1:0,JSON.stringify(normalized.hazardTypes),normalized.hazardDescription,normalized.location,normalized.preLikelihood,normalized.preSeverity,normalized.preRiskScore,normalized.improvementSuggestion,normalized.postLikelihood,normalized.postSeverity,normalized.postRiskScore,normalized.safeReason,JSON.stringify(normalized),submittedAt,row.id,row.updatedAt);
-    const result = (await env.DB.batch([insert, ...photoStatements(env, row.id, id, photos)]))[0];
+    const result = await insert.run();
     if (result.meta?.changes !== 1) throw new Error('SURVEY_CHANGED');
     return json({ ok: true, submittedAt }, 201);
   } catch (error) {
-    await discardPhotos(env, photos);
     if (['SURVEY_CHANGED','DUPLICATE_RESPONSE'].includes(error.message)) return errorResponse(error.message, 409);
-    if (error.message === 'PHOTO_STORAGE_UNAVAILABLE') return errorResponse(error.message, 503);
-    if (['INVALID_RESPONSE','INVALID_DEPARTMENT','INVALID_PHOTO','PHOTO_REQUIRED'].includes(error.message)) return errorResponse(error.message, 400);
+    if (['INVALID_RESPONSE','INVALID_DEPARTMENT'].includes(error.message)) return errorResponse(error.message, 400);
     return errorResponse('INTERNAL_SERVER_ERROR', 500);
   }
 }
 
 function responseView(row) {
   const raw = JSON.parse(row.responseData || '{}');
-  const extra = raw.schemaVersion === 2 ? { answers: raw.answers, questionSnapshot: raw.questionSnapshot, revision: raw.revision, photos: raw.photos || [] } : { photos: [] };
+  const extra = raw.schemaVersion === 2 ? { answers: raw.answers, questionSnapshot: (raw.questionSnapshot || []).filter(q=>q.type!=='photo'), revision: raw.revision } : {};
   return { ...extra, id: row.id, submittedAt: row.submittedAt, isAnonymous: Boolean(row.isAnonymous), respondentName: row.isAnonymous ? null : row.respondentName, department: row.isAnonymous ? null : row.department, employeeId: row.isAnonymous ? null : row.employeeId, hasHazard: raw.schemaVersion === 2 ? raw.hasHazard : Boolean(row.hasHazard), hazardTypes: JSON.parse(row.hazardTypesJson || '[]'), hazardDescription: row.hazardDescription, location: row.location, preLikelihood: row.preLikelihood, preSeverity: row.preSeverity, preRiskScore: row.preRiskScore, improvementSuggestion: row.improvementSuggestion, postLikelihood: row.postLikelihood, postSeverity: row.postSeverity, postRiskScore: row.postRiskScore, safeReason: row.safeReason };
 }
 const SELECT_RESPONSE = 'SELECT r.id,r.response_data AS responseData,r.respondent_name AS respondentName,r.department,r.employee_id AS employeeId,r.is_anonymous AS isAnonymous,r.has_hazard AS hasHazard,r.hazard_types_json AS hazardTypesJson,r.hazard_description AS hazardDescription,r.location,r.pre_likelihood AS preLikelihood,r.pre_severity AS preSeverity,r.pre_risk_score AS preRiskScore,r.improvement_suggestion AS improvementSuggestion,r.post_likelihood AS postLikelihood,r.post_severity AS postSeverity,r.post_risk_score AS postRiskScore,r.safe_reason AS safeReason,r.submitted_at AS submittedAt';

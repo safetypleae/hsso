@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, createSurvey, call, responsePayload } from './helpers/risk-fixture.mjs';
-import { extendedFixture, extendedPayload, definedResponse, invoke, applyRiskExtension, png } from './helpers/risk-extended.mjs';
+import { extendedFixture, extendedPayload, definedResponse, invoke, applyRiskExtension } from './helpers/risk-extended.mjs';
 import { surveyCollection, surveyItem, publicSurvey, publicResponses, adminResponseItem, responseCsv } from '../server/risk-surveys.js';
 import { surveyStatistics, responseXlsx } from '../server/risk-statistics.js';
-import { responsePhoto, cleanupPhotos, MAX_PHOTO_BYTES } from '../server/risk-photos.js';
-import { onRequest as photoRoute } from '../functions/api/risk-surveys/[id]/responses/[responseId]/photos/[photoId].js';
 
 async function create(context, input=extendedPayload()) {const result=await invoke(surveyCollection,context,{method:'POST',data:input});assert.equal(result.status,201,JSON.stringify(result.data));return result.data.survey;}
-const submit=(context,survey,data=definedResponse(),files)=>invoke(publicResponses,context,{method:'POST',cookie:'',token:survey.publicToken,data,files});
+const submit=(context,survey,data=definedResponse())=>invoke(publicResponses,context,{method:'POST',cookie:'',token:survey.publicToken,data});
 const custom=[
   {id:'c_single',type:'single_choice',text:'보호구 지급',required:true,options:['예','아니오']},
   {id:'c_multi',type:'multiple_choice',text:'필요 장비',required:false,options:['안전모','안전화']},
@@ -24,7 +22,7 @@ test('additive migration leaves existing columns/data unchanged, legacy public r
   assert.equal((await call(publicResponses,context.db,{method:'POST',params:{token:survey.publicToken},data:responsePayload()})).status,201);
   const before=context.db.sqlite.prepare('SELECT * FROM risk_responses').all();
   assert.equal((await invoke(surveyCollection,context,{method:'POST',data:extendedPayload()})).data.error,'MIGRATION_REQUIRED');
-  const legacy=await invoke(publicSurvey,context,{cookie:'',token:survey.publicToken});assert.equal(legacy.status,200);assert.equal(legacy.data.survey.questions.length,9);
+  const legacy=await invoke(publicSurvey,context,{cookie:'',token:survey.publicToken});assert.equal(legacy.status,200);assert.equal(legacy.data.survey.questions.length,8);
   const input=definedResponse(0);input.department='';input.employeeId='E2';assert.equal((await submit(context,survey,input)).status,201);
   applyRiskExtension(context.db);
   assert.deepEqual(context.db.sqlite.prepare('PRAGMA table_info(risk_responses)').all(),columns);
@@ -36,10 +34,10 @@ test('additive migration leaves existing columns/data unchanged, legacy public r
 test('company, authored departments, custom definitions and anonymous public submission',async t=>{
   const context=await extendedFixture(t),payload=extendedPayload();payload.questions.push(...custom);
   const survey=await create(context,payload),get=await invoke(publicSurvey,context,{cookie:'',token:survey.publicToken});
-  assert.equal(get.data.survey.companyName,payload.companyName);assert.deepEqual(get.data.survey.departments,['BM오션','BM환경']);assert.equal(get.data.survey.photoUploadAvailable,true);
+  assert.equal(get.data.survey.companyName,payload.companyName);assert.deepEqual(get.data.survey.departments,['BM오션','BM환경']);assert.equal(Object.hasOwn(get.data.survey,'photoUploadAvailable'),false);
   assert.equal((await submit(context,survey,withCustom())).status,201);
   const row=context.db.sqlite.prepare('SELECT * FROM risk_responses').get(),snapshot=JSON.parse(row.response_data);
-  assert.equal(snapshot.answers.c_short,'원본 보존');assert.equal(snapshot.questionSnapshot.length,14);assert.equal(row.pre_risk_score,20);
+  assert.equal(snapshot.answers.c_short,'원본 보존');assert.equal(snapshot.questionSnapshot.length,13);assert.equal(row.pre_risk_score,20);
   const invalid=withCustom();invalid.department='임의 부서';assert.equal((await submit(context,survey,invalid)).data.error,'INVALID_DEPARTMENT');
   const anon=withCustom();anon.isAnonymous=true;assert.equal((await submit(context,survey,anon)).status,201);
   const anonymous=context.db.sqlite.prepare('SELECT respondent_name,department,employee_id FROM risk_responses WHERE is_anonymous=1').get();assert.deepEqual({...anonymous},{respondent_name:null,department:null,employee_id:null});
@@ -57,7 +55,7 @@ test('custom statistics, rating dimensions and company+department XLSX share fil
   assert.equal(q('q5').dimensions[0].distribution[4].percent,100);assert.equal(q('q5').dimensions[1].distribution[3].count,1);
   assert.equal(q('q7').dimensions[0].distribution[1].count,1);assert.equal(q('q7').dimensions[1].distribution[1].count,1);
   const xlsx=await invoke(responseXlsx,context,{id:survey.id,query}),bytes=Buffer.from(await xlsx.response.arrayBuffer());
-  assert(bytes.includes(Buffer.from('원본 보존')));assert(bytes.includes(Buffer.from('회사명')));assert(bytes.includes(Buffer.from('HSSO 회사')));assert(!bytes.includes(Buffer.from('BM환경')));assert(bytes.includes(Buffer.from('첨부사진 수')));
+  assert(bytes.includes(Buffer.from('원본 보존')));assert(bytes.includes(Buffer.from('회사명')));assert(bytes.includes(Buffer.from('HSSO 회사')));assert(!bytes.includes(Buffer.from('BM환경')));assert(!bytes.includes(Buffer.from('첨부사진 수')));
   assert.equal((await invoke(surveyStatistics,context,{id:survey.id,query:'?company=other'})).data.total,0);
 });
 
@@ -95,31 +93,24 @@ test('owner-only edit/delete, cross-Origin protection and required deletion conf
   assert.equal((await invoke(publicSurvey,context,{token:survey.publicToken,cookie:''})).status,404);
 });
 
-test('private R2 photo storage, owner reads, statistics links, cascaded delete with retry queue',async t=>{
-  const context=await extendedFixture(t),survey=await create(context);
-  const result=await submit(context,survey,definedResponse(),[new File([png],'사진.png',{type:'image/png'})]);assert.equal(result.status,201,JSON.stringify(result.data));
-  const photo=context.db.sqlite.prepare('SELECT * FROM risk_response_photos').get();assert.equal(context.env.RISK_PHOTOS.objects.size,1);assert.equal(context.db.sqlite.prepare('SELECT COUNT(*) AS n FROM risk_photo_deletions').get().n,0);
-  for(const handler of [responsePhoto,photoRoute]){
-    const args={id:survey.id,responseId:photo.response_id,photoId:photo.id};assert.equal((await invoke(handler,context,{...args,cookie:''})).status,401);assert.equal((await invoke(handler,context,{...args,cookie:context.b.cookie})).status,404);
-    const read=await invoke(handler,context,args);assert.equal(read.status,200);assert.deepEqual(Buffer.from(await read.response.arrayBuffer()),png);assert.equal(read.response.headers.get('Cache-Control'),'no-store');
-  }
-  const detail=await invoke(adminResponseItem,context,{id:survey.id,responseId:photo.response_id});assert.equal(detail.data.response.photos.length,1);assert(!JSON.stringify(detail.data).includes('object_key'));
-  const stats=await invoke(surveyStatistics,context,{id:survey.id});assert(stats.data.questions.find(q=>q.id==='q8').photos[0].url.includes(photo.id));
-  context.env.RISK_PHOTOS.failDelete=true;
-  assert.equal((await invoke(surveyItem,context,{id:survey.id,method:'DELETE',data:{confirmTitle:survey.title}})).status,200);
-  for(const table of ['risk_surveys','risk_responses','risk_survey_metadata','risk_survey_versions','risk_response_photos'])assert.equal(context.db.sqlite.prepare('SELECT COUNT(*) AS n FROM '+table).get().n,0);
-  assert.equal(context.db.sqlite.prepare('SELECT COUNT(*) AS n FROM risk_photo_deletions').get().n,1);
-  assert.equal((await invoke(responsePhoto,context,{id:survey.id,responseId:photo.response_id,photoId:photo.id})).status,404);
-  context.env.RISK_PHOTOS.failDelete=false;await cleanupPhotos(context.env);assert.equal(context.env.RISK_PHOTOS.objects.size,0);
-});
-
-test('photo MIME/size/count validation, missing binding and storage failure do not save partial responses',async t=>{
-  const context=await extendedFixture(t),survey=await create(context);
-  const image=()=>new File([png],'photo.png',{type:'image/png'});
-  for(const files of [[new File(['<svg onload=alert(1)>'],'fake.png',{type:'image/png'})],[new File([png],'fake.jpg',{type:'image/jpeg'})],[new File([new Uint8Array(MAX_PHOTO_BYTES+1)],'big.png',{type:'image/png'})],[image(),image(),image(),image()]])assert.equal((await submit(context,survey,definedResponse(),files)).status,400);
-  const bucket=context.env.RISK_PHOTOS;delete context.env.RISK_PHOTOS;assert.equal((await submit(context,survey,definedResponse(),[image()])).status,503);context.env.RISK_PHOTOS=bucket;
-  bucket.failPut=true;assert.equal((await submit(context,survey,definedResponse(),[image()])).status,500);
-  assert.equal(context.db.sqlite.prepare('SELECT COUNT(*) AS n FROM risk_responses').get().n,0);assert.equal(bucket.objects.size,0);
+test('question descriptions persist, update publicly, and do not split or rewrite existing responses',async t=>{
+  const context=await extendedFixture(t),payload=extendedPayload();payload.questions.push(...custom);
+  const survey=await create(context,payload),first=withCustom();assert.equal((await submit(context,survey,first)).status,201);
+  const storedBefore=context.db.sqlite.prepare('SELECT response_data FROM risk_responses').get().response_data;
+  const edit={...payload,revision:1,questions:payload.questions.map(q=>q.id==='c_short'?{...q,description:'추가된 안내문'}:q)};
+  assert.equal((await invoke(surveyItem,context,{id:survey.id,method:'PATCH',data:edit})).status,200);
+  assert.equal(context.db.sqlite.prepare('SELECT response_data FROM risk_responses').get().response_data,storedBefore);
+  let publicResult=await invoke(publicSurvey,context,{cookie:'',token:survey.publicToken});
+  assert.equal(publicResult.data.survey.questions.find(q=>q.id==='c_short').description,'추가된 안내문');
+  assert.match(publicResult.data.survey.questions.find(q=>q.id==='q4').description,/건물명, 층, 구역/);
+  const modified={...edit,revision:2,questions:edit.questions.map(q=>q.id==='c_short'?{...q,description:'수정된 안내문'}:q)};
+  assert.equal((await invoke(surveyItem,context,{id:survey.id,method:'PATCH',data:modified})).status,200);
+  publicResult=await invoke(publicSurvey,context,{cookie:'',token:survey.publicToken});assert.equal(publicResult.data.survey.questions.find(q=>q.id==='c_short').description,'수정된 안내문');
+  const removed={...modified,revision:3,questions:modified.questions.map(q=>q.id==='c_short'?{...q,description:''}:q)};
+  assert.equal((await invoke(surveyItem,context,{id:survey.id,method:'PATCH',data:removed})).status,200);
+  publicResult=await invoke(publicSurvey,context,{cookie:'',token:survey.publicToken});assert.equal(publicResult.data.survey.questions.find(q=>q.id==='c_short').description,'');
+  const stats=await invoke(surveyStatistics,context,{id:survey.id});
+  assert.equal(stats.data.questions.filter(q=>q.id==='c_short').length,1);assert.deepEqual(stats.data.questions.find(q=>q.id==='c_short').answers,['원본 보존']);
 });
 
 test('custom-only questionnaire and removed hazard gate remain answerable without fabricating risk scores',async t=>{

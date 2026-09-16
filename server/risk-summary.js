@@ -1,8 +1,9 @@
 import { DEFAULT_QUESTIONS, CUSTOM_TYPES, multipleType, choiceType, legacyAnswers, questionKey, LIKELIHOOD, SEVERITY } from '../assets/risk/schema.js';
 
 export function questionVariants(questions, responses) {
-  const current = questions.map(q => ({ ...q, key: questionKey(q), archived: false })), seen = new Set(current.map(q => q.key));
+  const current = questions.filter(q=>q.type!=='photo').map(q => ({ ...q, key: questionKey(q), archived: false })), seen = new Set(current.map(q => q.key));
   for (const r of responses) for (const q of r.questionSnapshot || []) {
+    if(q.type==='photo')continue;
     const key = questionKey(q); if (!seen.has(key)) { seen.add(key); current.push({ ...q, key, archived: true }); }
   }
   return current;
@@ -19,7 +20,6 @@ export function summarize(questions, responses) {
     const eligible = responses.filter(r => !r.questionSnapshot || r.questionSnapshot.some(old => questionKey(old) === q.key));
     const values = eligible.map(r => (r.answers || legacyAnswers(r))[q.id]).filter(v => v != null && v !== '' && (!Array.isArray(v) || v.length));
     const result = { id: q.id, key: q.key, title: q.text + (q.archived ? ' (이전 문항)' : ''), archived: q.archived, answered: values.length };
-    if (type === 'photo') return { ...result, kind: 'photos', answered: eligible.filter(r => r.photos?.length).length, photos: eligible.flatMap(r => (r.photos || []).map(p => ({ ...p, submittedAt: r.submittedAt }))) };
     if (['pre_risk', 'post_risk'].includes(type)) {
       const ratings = values.filter(v => v.likelihood != null && v.severity != null), scores = ratings.map(v => v.likelihood * v.severity);
       return { ...result, kind: 'score', answered: ratings.length, average: scores.length ? Math.round(scores.reduce((sum, v) => sum + v, 0) / scores.length * 100) / 100 : null,

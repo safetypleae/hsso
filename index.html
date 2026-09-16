@@ -491,7 +491,7 @@
           <li id="survey-question-1"><span class="survey-question-type">문항 1 · 예 / 아니오</span><h3>현재 작업 중 위험요인이 있다고 생각하십니까?</h3><ul class="survey-choice-list"><li>예</li><li>아니오</li></ul></li>
           <li id="survey-question-2"><span class="survey-question-type">문항 2 · 복수 선택</span><h3>어떤 위험요인에 해당합니까?</h3><ul class="survey-choice-list"><li>추락</li><li>미끄러짐·넘어짐</li><li>끼임</li><li>부딪힘</li><li>낙하·비래</li><li>화재·폭발</li><li>전기</li><li>화학물질</li><li>근골격계</li><li>차량·지게차</li><li>기타</li></ul></li>
           <li id="survey-question-3"><span class="survey-question-type">문항 3 · 장문형</span><h3>위험한 상황을 구체적으로 작성해주세요.</h3><p class="survey-answer-note">위험 상황을 자유롭게 작성하는 문항</p></li>
-          <li id="survey-question-4"><span class="survey-question-type">문항 4 · 단답형</span><h3>위험 장소를 작성해주세요.</h3><p class="survey-answer-note">위험이 발생하는 장소를 짧게 작성하는 문항</p></li>
+          <li id="survey-question-4"><span class="survey-question-type">문항 4 · 단답형</span><h3>위험 장소를 작성해주세요.</h3><p class="survey-answer-note">위험요인이 있는 위치를 건물명, 층, 구역 등 구체적으로 작성해주세요.</p></li>
           <li id="survey-question-5">
             <span class="survey-question-type">문항 5 · 빈도·강도법</span><h3>개선 전 위험성</h3>
             <p id="before-risk-help" class="survey-answer-note">현재 상태에서의 위험성을 평가해주세요.</p>
@@ -511,7 +511,6 @@
             </div>
             <div class="survey-risk-result"><span>발생 가능성 × 중대성 = 위험성</span><output id="after-risk-score" name="after-risk-score" for="after-likelihood after-severity" aria-live="polite">발생 가능성과 중대성을 모두 선택해주세요.</output></div>
           </li>
-          <li id="survey-question-8"><span class="survey-question-type">문항 8 · 파일 첨부형</span><h3>현장 사진</h3><label class="survey-attachment" for="survey-photo-example">사진 첨부 예시<input id="survey-photo-example" name="photoExample" type="file" accept="image/*" disabled><span>파일 첨부 기능은 준비 중입니다.</span></label></li>
         </ol>
         <aside class="survey-no-risk" aria-labelledby="survey-no-risk-heading">
           <span class="survey-question-type">위험요인 없음 응답자용 · 단일 선택</span>
@@ -525,7 +524,6 @@
         <div class="survey-option-grid">
           <label class="survey-option"><input id="survey-allow-duplicates" name="allowDuplicates" type="checkbox"> 중복 응답 허용</label>
           <label class="survey-option"><input id="survey-allow-edit" name="allowEdit" type="checkbox"> 제출 후 수정 허용</label>
-          <label class="survey-option"><input id="survey-allow-photo" name="allowPhoto" type="checkbox" checked> 사진 첨부 허용</label>
           <label class="survey-option"><input id="survey-active" name="active" type="checkbox" checked> 설문 활성화</label>
         </div>
       </section>
@@ -579,7 +577,6 @@
           <fieldset class="worker-rating"><legend>중대성</legend><div id="worker-after-severity" class="worker-rating-options"></div></fieldset>
           <div class="survey-risk-result"><span>발생 가능성 × 중대성 = 위험성</span><output id="worker-after-risk-score" name="workerAfterRiskScore" aria-live="polite">발생 가능성과 중대성을 모두 선택해주세요.</output></div>
         </section>
-        <section id="worker-photo-field" class="worker-section"><label class="survey-field" for="worker-photo">현장 사진<input id="worker-photo" name="workerPhoto" type="file" accept="image/*"></label><p class="survey-help">미리보기에서는 선택한 사진이 서버로 전송되지 않습니다.</p></section>
       </div>
       <fieldset id="worker-safe-reasons-field" class="worker-section" hidden><legend>현재 작업환경이 안전하다고 생각하는 가장 큰 이유는 무엇입니까?</legend><p class="survey-help">가장 큰 이유 한 가지를 선택해주세요.</p><div id="worker-safe-reasons" class="worker-reason-options"></div></fieldset>
       <button class="primary-button" id="worker-submit-button" type="submit">제출하기</button>

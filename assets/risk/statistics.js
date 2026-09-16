@@ -1,4 +1,3 @@
-import { photoGallery } from './response-details.js';
 const element = (tag, text = '', className = '') => Object.assign(document.createElement(tag), { textContent: text, className });
 const colors = ['#4056a1', '#149080', '#b05a88', '#bf731b'];
 
@@ -8,8 +7,7 @@ function questionCard(question, index) {
   card.append(element('h2', `${index == null ? '' : (index + 1) + '. '}${question.title}`));
   if (question.kind === 'unsupported') { card.append(element('p', question.note)); return card; }
   card.append(element('p', `응답 ${question.answered}개`, 'risk-stat-caption'));
-  if (question.kind === 'photos') { card.append(question.photos.length ? photoGallery(question.photos) : element('p','첨부된 사진이 없습니다.')); return card; }
-  if (question.dimensions) { const dimensions=element('div','','risk-stat-dimensions');dimensions.append(...question.dimensions.map(q=>questionCard(q,null)));card.append(dimensions,element('h3','계산된 위험성 점수 (추가 정보)')); }
+  if (question.dimensions) { const dimensions=element('div','','risk-stat-dimensions');dimensions.append(...question.dimensions.map(q=>questionCard(q,null)));card.append(dimensions);return card; }
   if (question.kind === 'multiple') card.append(element('p', '복수 선택 · 비율은 이 문항 응답자 기준이며 합계가 100%를 넘을 수 있습니다.', 'risk-stat-caption'));
   if (question.kind === 'score') card.append(element('p', `발생가능성 × 중대성 (1~20점) · 평균 ${question.average ?? '—'}점${question.id === 'q7' ? ' · 개선 후 예상값' : ''}`, 'risk-stat-caption'));
   if (!question.answered) { card.append(element('p', '아직 이 문항에 대한 응답이 없습니다.')); return card; }

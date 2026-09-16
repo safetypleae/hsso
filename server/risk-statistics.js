@@ -28,8 +28,7 @@ async function loadResults({ request, env, params }) {
     const original = await env.DB.prepare('SELECT definition_json FROM risk_survey_versions WHERE survey_id=? AND revision=0').bind(survey.id).first();
     if (original) originalQuestions = JSON.parse(original.definition_json).questions;
   }
-  const responses = rows.results.map(responseView).map(r => ({ ...r, questionSnapshot: r.questionSnapshot || originalQuestions,
-    photos: r.photos.map(p => ({ ...p, url: '/api/risk-surveys/' + survey.id + '/responses/' + r.id + '/photos/' + p.id })) }));
+  const responses = rows.results.map(responseView).map(r => ({ ...r, questionSnapshot: r.questionSnapshot || originalQuestions }));
   return { survey, responses, filters: { department, company } };
 }
 
@@ -47,8 +46,8 @@ export async function responseXlsx(context) {
   try {
     const data = await loadResults(context); if (data.error) return data.error;
     const custom = questionVariants(data.survey.questions, data.responses).filter(q => Object.hasOwn(CUSTOM_TYPES, q.type));
-    const headers = ['응답 ID','제출일시 (UTC)','이름','부서','사번','익명 응답','위험요인 여부','위험유형 (복수 선택)','위험상황','작업장소','개선 전 발생가능성','개선 전 중대성','개선 전 위험성','개선의견','개선 후 예상 발생가능성','개선 후 예상 중대성','개선 후 예상 위험성','안전 사유', '회사명', '첨부사진 수', ...custom.map(q => q.text + (q.archived ? ' (이전 문항)' : '') + ' [' + q.id + ']')];
-    const rows = data.responses.map(r => [r.id,r.submittedAt,r.isAnonymous?'익명':r.respondentName,r.department,r.employeeId,r.isAnonymous?'예':'아니오',r.hasHazard==null?'':r.hasHazard?'예':'아니오',r.hazardTypes.join(', '),r.hazardDescription,r.location,r.preLikelihood,r.preSeverity,r.preRiskScore,r.improvementSuggestion,r.postLikelihood,r.postSeverity,r.postRiskScore,r.safeReason,data.survey.companyName || '회사 미등록',r.photos.length,
+    const headers = ['응답 ID','제출일시 (UTC)','이름','부서','사번','익명 응답','위험요인 여부','위험유형 (복수 선택)','위험상황','작업장소','개선 전 발생가능성','개선 전 중대성','개선 전 위험성','개선의견','개선 후 예상 발생가능성','개선 후 예상 중대성','개선 후 예상 위험성','안전 사유', '회사명', ...custom.map(q => q.text + (q.archived ? ' (이전 문항)' : '') + ' [' + q.id + ']')];
+    const rows = data.responses.map(r => [r.id,r.submittedAt,r.isAnonymous?'익명':r.respondentName,r.department,r.employeeId,r.isAnonymous?'예':'아니오',r.hasHazard==null?'':r.hasHazard?'예':'아니오',r.hazardTypes.join(', '),r.hazardDescription,r.location,r.preLikelihood,r.preSeverity,r.preRiskScore,r.improvementSuggestion,r.postLikelihood,r.postSeverity,r.postRiskScore,r.safeReason,data.survey.companyName || '회사 미등록',
       ...custom.map(q => r.questionSnapshot.some(old => questionKey(old) === q.key) ? (Array.isArray(r.answers?.[q.id]) ? r.answers[q.id].join(', ') : r.answers?.[q.id] ?? '') : '')]);
     const filename = '위험성평가_' + data.survey.title.slice(0,80) + '_' + (data.filters.department || '전체').slice(0,60) + '.xlsx';
     return new Response(riskWorkbook(headers, rows), { headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

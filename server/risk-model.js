@@ -4,11 +4,12 @@ export async function extensionsAvailable(env) {
   return Boolean(await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").bind('risk_survey_metadata').first());
 }
 export async function surveyExtension(env, id, stored) {
+  const questions = stored.filter(q => q.type !== 'photo');
   if (await extensionsAvailable(env)) {
     const meta = await env.DB.prepare('SELECT company_name AS companyName,departments_json AS departmentsJson,revision FROM risk_survey_metadata WHERE survey_id=?').bind(id).first();
-    if (meta) return { schemaVersion: 2, companyName: meta.companyName, departments: JSON.parse(meta.departmentsJson), revision: meta.revision, questions: stored };
+    if (meta) return { schemaVersion: 2, companyName: meta.companyName, departments: JSON.parse(meta.departmentsJson), revision: meta.revision, questions };
   }
-  return { schemaVersion: 1, companyName: '', departments: [], revision: 0, questions: legacyQuestions(stored) };
+  return { schemaVersion: 1, companyName: '', departments: [], revision: 0, questions: legacyQuestions(questions) };
 }
 const text = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 export function validDefinition(input) {
@@ -17,16 +18,15 @@ export function validDefinition(input) {
   const questions = input.questions;
   if (!Array.isArray(questions) || !questions.length || questions.length > 30 || new Set(questions.map(q => q.id)).size !== questions.length) return false;
   return questions.every(q => {
-    if (!q || !text(q.id, 50) || !/^[a-zA-Z0-9_-]+$/.test(q.id) || !text(q.text, 500) || typeof q.required !== 'boolean') return false;
+    if (!q || !text(q.id, 50) || !/^[a-zA-Z0-9_-]+$/.test(q.id) || !text(q.text, 500) || typeof (q.description ?? '') !== 'string' || (q.description ?? '').length > 2000 || typeof q.required !== 'boolean') return false;
     const special = DEFAULT_QUESTIONS.find(v => v.id === q.id);
     if (special ? q.type !== special.type : !q.id.startsWith('c_') || !Object.hasOwn(CUSTOM_TYPES, q.type)) return false;
     if (q.type === 'hazard_gate' && JSON.stringify(q.options) !== JSON.stringify(['예','아니오'])) return false;
-    if (q.type === 'photo' && q.required && !input.settings.allowPhoto) return false;
     return !choiceType(q) || Array.isArray(q.options) && q.options.length > 0 && q.options.length <= 30 && q.options.every(v => text(v, 100) && v === v.trim()) && new Set(q.options).size === q.options.length;
   });
 }
 
-export function normalizeAnswers(input, definition, settings, photoCount) {
+export function normalizeAnswers(input, definition, settings) {
   if (!input || input.schemaVersion !== 2 || input.revision !== definition.revision || !input.answers || typeof input.answers !== 'object' || Array.isArray(input.answers)) throw new Error('SURVEY_CHANGED');
   const allowed = ['schemaVersion','revision','answers','respondentName','department','employeeId','isAnonymous'];
   if (Object.keys(input).some(k => !allowed.includes(k)) || typeof input.isAnonymous !== 'boolean') throw new Error('INVALID_RESPONSE');
@@ -38,12 +38,11 @@ export function normalizeAnswers(input, definition, settings, photoCount) {
   if (definition.departments.length && department && !definition.departments.includes(department)) throw new Error('INVALID_DEPARTMENT');
   if (!definition.departments.length && department) throw new Error('INVALID_DEPARTMENT');
   if (!input.isAnonymous && settings.collectDepartment && definition.departments.length && !department) throw new Error('INVALID_DEPARTMENT');
-  if (Object.keys(input.answers).some(id => !definition.questions.some(q => q.id === id && q.type !== 'photo'))) throw new Error('INVALID_RESPONSE');
+  if (Object.keys(input.answers).some(id => !definition.questions.some(q => q.id === id))) throw new Error('INVALID_RESPONSE');
   const answers = {};
   for (const q of definition.questions) {
     if (!visibleQuestion(q, definition.questions, input.answers, settings)) continue;
     const value = input.answers[q.id];
-    if (q.type === 'photo') { if (q.required && !photoCount) throw new Error('PHOTO_REQUIRED'); continue; }
     const empty = value == null || value === '' || Array.isArray(value) && !value.length;
     if (empty) { if (q.required) throw new Error('INVALID_RESPONSE'); continue; }
     if (choiceType(q)) {

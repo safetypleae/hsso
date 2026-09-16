@@ -19,7 +19,7 @@ export function initRiskSurveyWorkspace(navigate) {
     }catch(error){note.textContent=error.message;}finally{save.disabled=false;}
   });
   const match=/^\/survey\/([a-f0-9]{64})\/?$/.exec(location.pathname);
-  const controller={preview:()=>showSurvey({...read(),photoUploadAvailable:false},null)};
+  const controller={preview:()=>showSurvey(read(),null)};
   if(match){
     navigate('risk-survey-preview');document.querySelector('#risk-survey-preview > .back-button').hidden=true;document.querySelector('.site-header').hidden=true;document.querySelector('.site-footer').hidden=true;
     const workerForm=document.querySelector('#worker-survey-form');workerForm.replaceChildren(el('p','설문을 불러오는 중입니다.'));

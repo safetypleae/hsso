@@ -243,8 +243,5 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
       finally{trigger.disabled=false;}
     });
   }
-  document.addEventListener('visibilitychange',()=>{if(!root.hidden){if(document.hidden){++generation;clearContent();$('#my-nav').hidden=true;status.textContent='로그인 상태를 확인하고 있습니다.';}else load();}});
-  window.addEventListener('pagehide',()=>{++generation;clearContent();$('#my-nav').hidden=true;});
-  window.addEventListener('pageshow',event=>{if(event.persisted&&!root.hidden)load();});
   return view=>{++generation;clearContent();$('#my-nav').hidden=true;status.textContent='';if(dialog.open)dialog.close();if(view==='mypage'){current='dashboard';offset=0;load();}};
 }

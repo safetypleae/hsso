@@ -79,13 +79,17 @@ test('browser: survey management, charts, filters, XLSX, stale requests, error r
   await evaluate(`document.querySelector('[data-my-section="risk"]').click()`);
   await wait(`document.querySelector('.my-risk-row')`);
   await clickText('통계 보기'); await ready(3);
-  assert.equal(await evaluate(`document.querySelectorAll('.risk-stat-card').length`), 9);
+  assert.equal(await evaluate(`document.querySelectorAll('.risk-stat-card').length`), 8);
   assert.equal(await evaluate(`!!document.querySelector('[data-question-id="q1"] .risk-stat-pie')`), true);
   assert.equal(await evaluate(`!!document.querySelector('[data-question-id="q2"] .risk-stat-bar')`), true);
   assert.equal(await evaluate(`document.querySelector('[data-question-id="q3"] .risk-stat-text').children.length`), 2);
+  assert.equal(await evaluate(`document.querySelector('.risk-statistics').textContent.includes('계산된 위험성 점수')`), false);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-question-id="q5"] .risk-stat-dimensions .risk-stat-card').length`), 2);
   assert.equal(await evaluate(`!!document.querySelector('.risk-stat-text img') || !!window.__xss`), false);
   assert.equal(await evaluate(`document.querySelector('.risk-stat-controls select').disabled`), true);
   await choose('BM오션'); await ready(2);
+  await evaluate(`document.dispatchEvent(new Event('visibilitychange'))`);await ready(2);
+  assert.equal(await evaluate(`!!document.querySelector('.risk-statistics') && document.querySelector('#risk-stat-department').value==='BM오션'`),true);
   assert.equal(await evaluate(`document.querySelector('[data-question-id="q3"] .risk-stat-text').children.length`), 1);
   assert.match(await evaluate(`document.querySelector('[data-question-id="q1"]').textContent`), /1명 \(50%\)/);
   // Capture the browser download, then independently parse every XML ZIP entry.

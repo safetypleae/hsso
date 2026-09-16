@@ -8,13 +8,14 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fixture, createSurvey } from './helpers/risk-fixture.mjs';
+import { applyRiskExtension } from './helpers/risk-extended.mjs';
 import { surveyCollection, surveyItem, publicSurvey, publicResponses, adminResponses } from '../server/risk-surveys.js';
 import { collection as documents } from '../server/documents.js';
 import { onRequest as me } from '../functions/api/auth/me.js';
 import jsQR from './helpers/vendor/jsqr.cjs';
 
 test('direct public URL, response submission, creation/management QR and PNG scan', { skip: !process.env.HSSO_BROWSER, timeout: 60000 }, async t => {
-  const { db, a } = await fixture(t), survey = await createSurvey(db, a);
+  const { db, a } = await fixture(t), survey = await createSurvey(db, a);applyRiskExtension(db);
   const project = fileURLToPath(new URL('..', import.meta.url));
   const redirects = await readFile(join(project, '_redirects'), 'utf8');
   assert.match(redirects, /^\/survey\/\*\s+\/index\.html\s+200/m);
@@ -66,6 +67,8 @@ test('direct public URL, response submission, creation/management QR and PNG sca
   await wait(`document.readyState==='complete'`);
   assert(requests.includes('/script.js'), 'script.js must load at root. Actual requests: ' + requests.join(', '));
   await wait(`!document.querySelector('#risk-survey-preview').hidden && document.querySelector('#worker-survey-title').textContent==='2026년 위험성평가'`);
+  assert.equal(await evaluate(`document.querySelector('[data-question-id="q4"] .survey-help').textContent`),'위험요인이 있는 위치를 건물명, 층, 구역 등 구체적으로 작성해주세요.');
+  assert.equal(await evaluate(`!!document.querySelector('input[type="file"]')`),false);
   assert(requests.includes(`/api/public/risk-surveys/${survey.publicToken}`));
   assert.equal(await evaluate(`document.querySelector('#home').hidden`), true);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('#risk-survey-preview')).maxWidth`), '760px');
@@ -82,7 +85,8 @@ test('direct public URL, response submission, creation/management QR and PNG sca
   await cdp('Network.setCookie', { name: 'hsso_session', value: a.cookie.split('=')[1], url: base, httpOnly: true, sameSite: 'Lax' });
   await cdp('Page.navigate', { url: base + '/#risk-survey-create' });
   await wait(`location.pathname==='/' && document.querySelector('#risk-survey-create')?.hidden===false`);
-  await evaluate(`document.querySelector('#survey-title').value='현장/정기:설문';document.querySelector('#survey-target').value='현장';document.querySelector('#survey-start-date').value='2020-01-01';document.querySelector('#survey-end-date').value='2099-12-31';document.querySelector('#survey-create-button').click()`);
+  assert.equal(await evaluate(`[...document.querySelectorAll('.risk-builder-question select')].some(select=>select.textContent.includes('improvement'))`),false);
+  await evaluate(`document.querySelector('#survey-title').value='현장/정기:설문';document.querySelector('#survey-company').value='현장 회사';document.querySelector('#survey-target').value='현장';document.querySelector('#survey-start-date').value='2020-01-01';document.querySelector('#survey-end-date').value='2099-12-31';[...document.querySelectorAll('#risk-survey-form button')].find(b=>b.textContent==='부서 추가').click();document.querySelector('[data-department="0"]').value='BM오션';document.querySelector('[data-department="0"]').dispatchEvent(new Event('input'));const description=document.querySelector('[data-question-id="q4"] [data-field="description"]');description.value='건물과 층을 정확히 적어주세요.';description.dispatchEvent(new Event('input'));document.querySelector('#survey-create-button').click()`);
   await wait(`document.querySelector('#survey-action-note a')`);
   const createdUrl = await evaluate(`document.querySelector('#survey-action-note a').href`);
   const created = db.sqlite.prepare('SELECT id,public_token FROM risk_surveys WHERE title=?').get('현장/정기:설문');
@@ -118,6 +122,7 @@ test('direct public URL, response submission, creation/management QR and PNG sca
   await cdp('Network.deleteCookies', { name: 'hsso_session', url: base });
   await cdp('Page.navigate', { url: scanned.data });
   await wait(`document.querySelector('#worker-survey-title')?.textContent==='현장/정기:설문' && document.querySelector('#risk-survey-preview')?.hidden===false`);
+  assert.equal(await evaluate(`document.querySelector('[data-question-id="q4"] .risk-question-description').textContent`),'건물과 층을 정확히 적어주세요.');
   await evaluate(`document.querySelector('#worker-name').value='QR 응답자';document.querySelector('#worker-department').value='BM오션';document.querySelector('input[name="workerHasHazard"][value="no"]').click();document.querySelector('input[name="workerSafeReason"]').click();document.querySelector('#worker-submit-button').click()`);
   await wait(`document.querySelector('#worker-submit-message').textContent==='응답이 제출되었습니다.'`);
   assert.equal(db.sqlite.prepare('SELECT respondent_name FROM risk_responses WHERE survey_id=?').get(created.id).respondent_name, 'QR 응답자');
