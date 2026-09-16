@@ -281,25 +281,35 @@ body:has(#home:not([hidden])) .portal-account span { grid-column: 2; color: #9db
 
 /* Immersive first-screen portal stage */
 .portal-screen-primary { position: relative; isolation: isolate; min-height: calc(100svh - 68px); overflow: hidden; color: #f8fafb; background: linear-gradient(155deg, #092638 0%, #153f4d 56%, #20746d 115%); }
-.hsso-ambient-scene { --hsso-parallax-x: 0px; --hsso-parallax-y: 0px; position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; background: radial-gradient(circle at 48% 35%,rgba(66,185,150,.1),transparent 31%),linear-gradient(135deg,rgba(8,38,56,.2),rgba(20,91,87,.14)); background-size: 140% 140%; animation: hsso-ambient-gradient 28s ease-in-out infinite alternate; }
+.hsso-ambient-scene { --hsso-parallax-x: 0px; --hsso-parallax-y: 0px; position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; background: radial-gradient(circle at 18% 22%,rgba(50,119,145,.17),transparent 33%),radial-gradient(circle at 78% 74%,rgba(28,154,127,.13),transparent 38%),linear-gradient(135deg,rgba(8,38,56,.2),rgba(20,91,87,.14)); background-size: 140% 140%; animation: hsso-ambient-gradient 32s ease-in-out infinite alternate; }
 .hsso-ambient-glow { position: absolute; display: block; border-radius: 50%; filter: blur(52px); opacity: .22; will-change: transform; }
 .hsso-ambient-glow-a { top: -18%; left: -8%; width: 45vw; height: 45vw; background: rgba(38,103,145,.4); transform: translate(calc(var(--hsso-parallax-x) * -.45),calc(var(--hsso-parallax-y) * -.45)); animation: hsso-glow-a 31s ease-in-out infinite alternate; }
 .hsso-ambient-glow-b { right: -10%; bottom: -24%; width: 52vw; height: 52vw; background: rgba(29,167,135,.34); transform: translate(var(--hsso-parallax-x),var(--hsso-parallax-y)); animation: hsso-glow-b 35s ease-in-out infinite alternate; }
 .hsso-ambient-glow-c { top: 24%; left: 38%; width: 30vw; height: 30vw; background: rgba(64,179,180,.2); transform: translate(calc(var(--hsso-parallax-x) * .65),calc(var(--hsso-parallax-y) * .65)); animation: hsso-glow-c 24s ease-in-out infinite alternate; }
-.hsso-safety-network { position: absolute; inset: -3%; width: 106%; height: 106%; opacity: .17; transform: translate(calc(var(--hsso-parallax-x) * -.7),calc(var(--hsso-parallax-y) * -.7)); transition: transform .8s cubic-bezier(.22,1,.36,1); }
-.hsso-network-lines { fill: none; stroke: #a6d3cf; stroke-width: 1; stroke-dasharray: 3 10; animation: hsso-network-flow 24s linear infinite; }
-.hsso-network-nodes { fill: #bde5df; }
-.hsso-network-nodes circle:nth-child(3n+1) { animation: hsso-network-pulse 8s ease-in-out infinite; }
-.hsso-network-nodes circle:nth-child(3n+2) { animation: hsso-network-pulse 9s ease-in-out infinite -3s; }
-.hsso-network-nodes circle:nth-child(3n) { animation: hsso-network-pulse 10s ease-in-out infinite -6s; }
-.hsso-ambient-scan { position: absolute; top: -35%; left: -22%; width: 38%; height: 170%; opacity: 0; transform: rotate(18deg); background: linear-gradient(90deg,transparent,rgba(160,225,215,.08),transparent); animation: hsso-ambient-scan 18s cubic-bezier(.22,1,.36,1) infinite 4s; }
+.hsso-starfield { position: absolute; inset: 0; transform: translate(calc(var(--hsso-parallax-x) * -.25),calc(var(--hsso-parallax-y) * -.25)); transition: transform 1.2s cubic-bezier(.22,1,.36,1); }
+.hsso-starfield i { position: absolute; top: var(--y); left: var(--x); width: var(--s); height: var(--s); border-radius: 50%; background: #dceceb; box-shadow: 0 0 4px rgba(207,237,233,.38); opacity: var(--o); animation: hsso-background-twinkle 9s ease-in-out infinite var(--d); }
+.hsso-scorpius { position: absolute; top: 7%; left: 3.5%; width: min(35vw,470px); height: 72%; overflow: visible; filter: drop-shadow(0 0 6px rgba(184,230,222,.12)); transform: translate(calc(var(--hsso-parallax-x) * -.55),calc(var(--hsso-parallax-y) * -.55)); transition: transform 1s cubic-bezier(.22,1,.36,1); }
+.hsso-constellation-lines { fill: none; stroke: rgba(181,221,216,.28); stroke-width: 1.05; stroke-linecap: round; }
+.hsso-constellation-lines path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: hsso-constellation-line .48s ease-out forwards var(--d); }
+.hsso-constellation-stars circle { fill: #eef8f6; opacity: 0; transform-box: fill-box; transform-origin: center; animation: hsso-constellation-enter .5s cubic-bezier(.16,1,.3,1) forwards var(--d),hsso-constellation-twinkle var(--t) ease-in-out infinite calc(4s + var(--td)); }
+.hsso-constellation-stars circle:not(.hsso-antares) { filter: drop-shadow(0 0 4px rgba(219,244,239,.6)); }
+.hsso-constellation-stars .hsso-antares { fill: #f4dfbd; filter: drop-shadow(0 0 8px rgba(239,195,135,.66)); }
+.hsso-constellation-stars .hsso-sargas,.hsso-constellation-stars .hsso-shaula { fill: #f1f8f5; filter: drop-shadow(0 0 6px rgba(214,241,235,.7)); }
+.hsso-shooting-star { position: absolute; z-index: 1; width: 3px; height: 3px; border-radius: 50%; background: rgba(241,250,248,.94); box-shadow: 0 0 7px rgba(222,246,241,.9); opacity: 0; transform: rotate(-23deg); }
+.hsso-shooting-star::after { content: ""; position: absolute; top: 1px; right: 1px; width: 72px; height: 1px; transform-origin: right center; background: linear-gradient(90deg,transparent,rgba(220,243,239,.72)); }
+.shooting-star-one { top: 17%; left: 70%; animation: hsso-shooting-star 11s ease-out infinite 6s; }
+.shooting-star-two { top: 54%; left: 88%; animation: hsso-shooting-star-alt 17s ease-out infinite 12s; }
+.shooting-star-three { top: 9%; left: 45%; animation: hsso-shooting-star 14s ease-out infinite 18s; }
 @keyframes hsso-ambient-gradient { from { background-position: 12% 20%; } to { background-position: 88% 72%; } }
 @keyframes hsso-glow-a { from { margin: 0; } to { margin: 7% 0 0 9%; } }
 @keyframes hsso-glow-b { from { margin: 0; } to { margin: 0 7% 5% 0; } }
 @keyframes hsso-glow-c { from { margin: 0; } to { margin: -5% 0 0 6%; } }
-@keyframes hsso-network-flow { to { stroke-dashoffset: -52; } }
-@keyframes hsso-network-pulse { 0%,76%,100% { opacity: .22; } 84% { opacity: .92; filter: drop-shadow(0 0 4px rgba(170,232,222,.7)); } }
-@keyframes hsso-ambient-scan { 0%,63% { left: -22%; opacity: 0; } 70% { opacity: .38; } 88% { left: 105%; opacity: 0; } 100% { left: 105%; opacity: 0; } }
+@keyframes hsso-constellation-line { to { stroke-dashoffset: 0; } }
+@keyframes hsso-constellation-enter { 0% { opacity: 0; transform: scale(.7); } 72% { opacity: 1; transform: scale(1.16); } 100% { opacity: .9; transform: scale(1); } }
+@keyframes hsso-constellation-twinkle { 0%,100% { opacity: .78; } 48% { opacity: 1; } 72% { opacity: .86; } }
+@keyframes hsso-background-twinkle { 0%,76%,100% { opacity: var(--o); } 84% { opacity: calc(var(--o) + .22); } }
+@keyframes hsso-shooting-star { 0%,87% { opacity: 0; transform: translate(0,0) rotate(-23deg); } 88% { opacity: 1; } 94% { opacity: 0; transform: translate(-210px,89px) rotate(-23deg); } 100% { opacity: 0; transform: translate(-210px,89px) rotate(-23deg); } }
+@keyframes hsso-shooting-star-alt { 0%,91% { opacity: 0; transform: translate(0,0) rotate(-18deg); } 92% { opacity: .85; } 97% { opacity: 0; transform: translate(-160px,52px) rotate(-18deg); } 100% { opacity: 0; transform: translate(-160px,52px) rotate(-18deg); } }
 .portal-screen-primary::before { content: ""; position: absolute; z-index: -2; inset: 0; opacity: .2; background-image: radial-gradient(circle, rgba(218,238,235,.65) 1px, transparent 1px); background-size: 34px 34px; mask-image: linear-gradient(to bottom, transparent 8%, #000 42%, transparent 88%); }
 .portal-screen-primary::after { content: ""; position: absolute; z-index: -1; right: -2%; bottom: -1px; left: -2%; height: 24%; background: #071f2d; opacity: .62; clip-path: polygon(0 72%,5% 72%,5% 55%,8% 55%,8% 67%,13% 67%,13% 38%,16% 38%,16% 63%,20% 63%,20% 50%,25% 50%,25% 70%,31% 70%,31% 43%,34% 43%,34% 59%,39% 59%,39% 31%,42% 31%,42% 68%,48% 68%,48% 48%,53% 48%,53% 61%,58% 61%,58% 35%,62% 35%,62% 69%,68% 69%,68% 53%,72% 53%,72% 66%,78% 66%,78% 42%,82% 42%,82% 57%,87% 57%,87% 29%,90% 29%,90% 65%,95% 65%,95% 50%,100% 50%,100% 100%,0 100%); }
 .portal-screen-primary .portal-shell { position: relative; z-index: 1; }
@@ -441,7 +451,8 @@ body:has(#home:not([hidden])) .header-account { margin-left: auto; }
 }
 
 /* Final slide transition and work-dashboard composition */
-.portal-screen-primary::after { height: 12%; opacity: .09; }
+.portal-screen-primary::before { opacity: .04; }
+.portal-screen-primary::after { display: none; }
 
 @media (min-width: 1001px) {
   html:has(.home-view:not([hidden])) { scroll-behavior: smooth; scroll-snap-type: y mandatory; scroll-padding-top: 68px; }
@@ -515,13 +526,17 @@ body:has(#home:not([hidden])) .header-account { margin-left: auto; }
 
 @media (max-width: 700px) {
   .hsso-ambient-glow { opacity: .14; filter: blur(65px); }
-  .hsso-safety-network { opacity: .1; }
-  .hsso-ambient-scan { display: none; }
+  .hsso-scorpius { top: 4%; left: -8%; width: 63vw; height: 48%; opacity: .55; }
+  .hsso-starfield i:nth-child(3n) { display: none; }
+  .hsso-shooting-star { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .home-view .portal-screen { transition-duration: 1ms; }
-  .hsso-ambient-scene,.hsso-ambient-glow,.hsso-safety-network,.hsso-network-lines,.hsso-network-nodes circle,.hsso-ambient-scan { animation: none; transition: none; }
+  .hsso-ambient-scene,.hsso-ambient-glow,.hsso-starfield,.hsso-starfield i,.hsso-scorpius,.hsso-constellation-lines path,.hsso-constellation-stars circle { animation: none; transition: none; }
+  .hsso-constellation-lines path { stroke-dashoffset: 0; }
+  .hsso-constellation-stars circle { opacity: .9; transform: scale(1); }
+  .hsso-shooting-star { display: none; }
 }
 
 .portal-board-list { display: grid; margin: 0; padding: 0; list-style: none; }

@@ -171,11 +171,15 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
       return {page:document.querySelector('#home').dataset.portalPage,indicator:document.querySelector('#portal-page-indicator').textContent,
         foreground:[document.querySelector('.portal-brand'),document.querySelector('.portal-floating-notice'),document.querySelector('.portal-recent'),document.querySelector('.portal-quiz')].every(node=>node.getBoundingClientRect().width>0),
         backgroundSafe:getComputedStyle(scene).position==='absolute'&&getComputedStyle(scene).pointerEvents==='none'&&Number(getComputedStyle(shell).zIndex)>Number(getComputedStyle(scene).zIndex),
-        ambientAnimated:getComputedStyle(scene).animationName==='hsso-ambient-gradient'};
+        ambientAnimated:getComputedStyle(scene).animationName==='hsso-ambient-gradient',
+        constellation:{stars:document.querySelectorAll('.hsso-constellation-stars circle').length,lines:document.querySelectorAll('.hsso-constellation-lines path').length,antares:!!document.querySelector('.hsso-antares'),entrance:getComputedStyle(document.querySelector('.hsso-constellation-stars circle')).animationName.includes('hsso-constellation-enter')},
+        shootingStars:[...document.querySelectorAll('.hsso-shooting-star')].every(star=>getComputedStyle(star).display!=='none'&&getComputedStyle(star).animationName.includes('hsso-shooting-star'))};
     })()`);
     assert.equal(firstPage.foreground,true,`existing home foreground ${width}`);
     assert.equal(firstPage.backgroundSafe,true,`ambient layering ${width}`);
     assert.equal(firstPage.ambientAnimated,true,`ambient animation ${width}`);
+    assert.deepEqual(firstPage.constellation,{stars:15,lines:9,antares:true,entrance:true},`Scorpius constellation ${width}`);
+    assert.equal(firstPage.shootingStars,width>700,`occasional shooting stars ${width}`);
     if(width>=1001){assert.equal(firstPage.page,'0');assert.equal(firstPage.indicator,'1 / 3');}
     await click('.main-nav [data-home-section="systems"]');
     await wait(width>=1001?`document.querySelector('#home').dataset.portalPage==='2' && document.querySelector('#systems').classList.contains('is-active')`:`location.hash==='#systems' && scrollY>0 && document.querySelector('#systems').getBoundingClientRect().bottom>0`);
@@ -189,8 +193,8 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
         noOverflow:document.documentElement.scrollWidth<=innerWidth && cards.every(card=>card.scrollWidth<=card.clientWidth),
         descriptionsVisible:cards.every(card=>card.querySelector('.hsso-system-description').getBoundingClientRect().height>0),
         links:[...document.querySelectorAll('.hsso-system-features a')].every(link=>link.hash && link.dataset.viewLink),
-        visualKinds:['.hsso-chemical-viz','.hsso-risk-viz','.hsso-health-viz'].every(selector=>document.querySelector(selector)?.children.length>=8),
-        idleFlow:getComputedStyle(document.querySelector('.hsso-flow-line'),'::after').animationName==='hsso-data-travel'
+        visualKinds:!!document.querySelector('.chem-document')&&!!document.querySelector('.chem-analyzer')&&document.querySelectorAll('.chem-results span').length===5&&document.querySelectorAll('.risk-participants > span').length===3&&!!document.querySelector('.risk-survey-panel')&&document.querySelectorAll('.health-task-list > div').length>=4,
+        narrativeFlow:[getComputedStyle(document.querySelector('.chem-document')).animationName,getComputedStyle(document.querySelector('.risk-choice i'),'::after').animationName,getComputedStyle(document.querySelector('.health-next-task')).animationName]
       };
     })()`);
     assert.equal(homeLayout.columns,width>=1001?3:width>=701?2:1,`system columns ${width}`);
@@ -200,7 +204,7 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
     assert.equal(homeLayout.descriptionsVisible,true,`system copy clipped ${width}`);
     assert.equal(homeLayout.links,true,`system links ${width}`);
     assert.equal(homeLayout.visualKinds,true,`system visualization ${width}`);
-    assert.equal(homeLayout.idleFlow,true,`system idle animation ${width}`);
+    assert.deepEqual(homeLayout.narrativeFlow,['chem-document-cycle','risk-option-cycle','health-next-task'],`system narrative animation ${width}`);
     if(width>=1001){
       assert.equal(await evaluate(`document.querySelector('#portal-page-indicator').textContent`),'3 / 3');
       assert.deepEqual(await evaluate(`({up:document.querySelector('#portal-page-up').disabled,down:document.querySelector('#portal-page-down').disabled})`),{up:false,down:true});
@@ -236,7 +240,12 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-system-card')).transitionDuration`),'0s');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-system-card')).transform`),'none');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-ambient-scene')).animationName`),'none');
-  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-flow-line'),'::after').animationName`),'none');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-constellation-stars circle')).animationName`),'none');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-shooting-star')).display`),'none');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.chem-results span')).animationName`),'none');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.chem-results span')).opacity`),'1');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.risk-survey-panel > em')).opacity`),'1');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.health-next-task')).opacity`),'1');
   await cdp('Emulation.setEmulatedMedia',{features:[]});
   await click('[data-view-link="maker"]');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-systems')).display`),'none');
