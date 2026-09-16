@@ -68,7 +68,7 @@ test('direct public URL, response submission, creation/management QR and PNG sca
   assert(requests.includes('/script.js'), 'script.js must load at root. Actual requests: ' + requests.join(', '));
   await wait(`!document.querySelector('#risk-survey-preview').hidden && document.querySelector('#worker-survey-title').textContent==='2026년 위험성평가'`);
   assert.equal(await evaluate(`document.querySelector('[data-question-id="q4"] .survey-help').textContent`),'위험요인이 있는 위치를 건물명, 층, 구역 등 구체적으로 작성해주세요.');
-  assert.equal(await evaluate(`!!document.querySelector('input[type="file"]')`),false);
+  assert.equal(await evaluate(`!!document.querySelector('#risk-survey-preview input[type="file"]')`),false);
   assert(requests.includes(`/api/public/risk-surveys/${survey.publicToken}`));
   assert.equal(await evaluate(`document.querySelector('#home').hidden`), true);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('#risk-survey-preview')).maxWidth`), '760px');

@@ -79,7 +79,7 @@ test('browser: survey management, charts, filters, XLSX, stale requests, error r
   await evaluate(`document.querySelector('[data-my-section="risk"]').click()`);
   await wait(`document.querySelector('.my-risk-row')`);
   await clickText('통계 보기'); await ready(3);
-  assert.equal(await evaluate(`document.querySelectorAll('.risk-stat-card').length`), 8);
+  assert.equal(await evaluate(`document.querySelectorAll('.risk-stat-cards > .risk-stat-card').length`), 8);
   assert.equal(await evaluate(`!!document.querySelector('[data-question-id="q1"] .risk-stat-pie')`), true);
   assert.equal(await evaluate(`!!document.querySelector('[data-question-id="q2"] .risk-stat-bar')`), true);
   assert.equal(await evaluate(`document.querySelector('[data-question-id="q3"] .risk-stat-text').children.length`), 2);
@@ -91,7 +91,7 @@ test('browser: survey management, charts, filters, XLSX, stale requests, error r
   await evaluate(`document.dispatchEvent(new Event('visibilitychange'))`);await ready(2);
   assert.equal(await evaluate(`!!document.querySelector('.risk-statistics') && document.querySelector('#risk-stat-department').value==='BM오션'`),true);
   assert.equal(await evaluate(`document.querySelector('[data-question-id="q3"] .risk-stat-text').children.length`), 1);
-  assert.match(await evaluate(`document.querySelector('[data-question-id="q1"]').textContent`), /1명 \(50%\)/);
+  assert.match(await evaluate(`document.querySelector('.risk-statistics [data-question-id="q1"]').textContent`), /1명 \(50%\)/);
   // Capture the browser download, then independently parse every XML ZIP entry.
   await evaluate(`window.__riskBlob=null;const originalCreate=URL.createObjectURL;URL.createObjectURL=function(blob){window.__riskBlob=blob;return originalCreate.call(this,blob)};const originalClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download){window.__riskFilename=this.download;return}originalClick.call(this)};`);
   await clickText('Excel 다운로드'); await wait(`!!window.__riskBlob && !document.querySelector('#risk-stat-download').disabled`);

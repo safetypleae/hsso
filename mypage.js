@@ -166,6 +166,99 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
       }
     });
   }
+  const APPLICATION_STATUS = { pending: '승인 대기', approved: '승인', rejected: '반려' };
+  const COMPANY_STATUS = { active: '활성', suspended: '정지', archived: '종료' };
+  function formField(form, name, label, value = '', options = {}) {
+    const wrap = el('label', label), input = options.textarea ? document.createElement('textarea') : document.createElement('input');
+    input.name = name; input.value = value; input.maxLength = options.maxLength || 100; input.required = options.required !== false;
+    if (options.textarea) input.rows = options.rows || 4;
+    wrap.append(input); form.append(wrap); return input;
+  }
+  async function renderCompanyWorkspace() {
+    const version = ++generation; clearContent(); status.textContent = '회사·권한 정보를 불러오는 중입니다.';
+    try {
+      const [applicationData, companyData, operatorData] = await Promise.all([
+        api('/api/company-admin-applications'), api('/api/companies'), role === 'admin' ? api('/api/admin/company-admin-applications?limit=100') : Promise.resolve(null)
+      ]);
+      if (version !== generation || root.hidden) return;
+      status.textContent = ''; heading('회사·권한 관리', '회사 관리자 신청과 연결된 회사 워크스페이스를 관리합니다.');
+      const applicationSection = el('section', '', 'my-company-section'); applicationSection.append(el('h2', '최초 회사 관리자 신청'));
+      if (applicationData.applications.length) {
+        const list = el('div');
+        for (const item of applicationData.applications) {
+          const card = el('article', '', 'my-application-card');
+          card.append(el('h3', item.companyName), el('p', `${item.departmentName} · ${item.positionTitle} · ${APPLICATION_STATUS[item.status]}`, 'my-secondary'), el('p', item.reason));
+          if (item.additionalInfo) card.append(el('p', `추가 확인정보: ${item.additionalInfo}`, 'my-secondary'));
+          if (item.reviewNote) card.append(el('p', `처리 의견: ${item.reviewNote}`, 'my-secondary'));
+          list.append(card);
+        }
+        applicationSection.append(list);
+      }
+      const applicationForm = el('form', '', 'my-company-form');
+      const companyName = formField(applicationForm, 'companyName', '회사명', user.companyName || '', { maxLength: 100 });
+      const departmentName = formField(applicationForm, 'departmentName', '부서명', user.departmentName || '', { maxLength: 100 });
+      const positionTitle = formField(applicationForm, 'positionTitle', '직책', user.position || '', { maxLength: 50 });
+      const reason = formField(applicationForm, 'reason', '신청 사유', '', { textarea: true, maxLength: 2000 });
+      const additionalInfo = formField(applicationForm, 'additionalInfo', '추가 확인정보 (선택)', '', { textarea: true, maxLength: 2000, required: false, rows: 3 });
+      const applyMessage = el('p', '', 'my-workspace-message'); applyMessage.setAttribute('role', 'status');
+      const apply = el('button', '신청하기', 'primary-button'); apply.type = 'submit'; applicationForm.append(applyMessage, apply);
+      applicationForm.addEventListener('submit', async event => {
+        event.preventDefault(); apply.disabled = true; applyMessage.textContent = '';
+        try { await api('/api/company-admin-applications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyName: companyName.value, departmentName: departmentName.value, positionTitle: positionTitle.value, reason: reason.value, additionalInfo: additionalInfo.value }) }); await renderCompanyWorkspace(); }
+        catch (error) { applyMessage.textContent = error.status === 409 ? '동일한 회사에 승인 대기 중인 신청이 있습니다.' : '신청을 저장하지 못했습니다.'; apply.disabled = false; }
+      });
+      applicationSection.append(applicationForm); content.append(applicationSection);
+
+      const connected = el('section', '', 'my-company-section'); connected.append(el('h2', '연결된 회사'));
+      if (!companyData.companies.length) connected.append(el('p', '연결된 회사 워크스페이스가 없습니다.', 'my-secondary'));
+      for (const company of companyData.companies) {
+        const card = el('article', '', 'my-company-card'); card.append(el('h2', company.name), el('p', `내 권한: ${company.role === 'company_admin' ? '회사 관리자' : '구성원'} · 회사 상태: ${COMPANY_STATUS[company.status] || company.status}`, 'my-secondary'));
+        if (company.role === 'company_admin' && company.membershipStatus === 'active') {
+          const departmentData = await api(`/api/companies/${encodeURIComponent(company.id)}/departments`);
+          if (version !== generation || root.hidden) return;
+          const list = el('div'); list.append(el('h3', '부서 목록'));
+          for (const department of departmentData.departments) {
+            const row = el('form', '', 'my-department-row'), name = document.createElement('input'), state = document.createElement('select');
+            name.name = 'name'; name.value = department.name; name.maxLength = 100; name.required = true; name.setAttribute('aria-label', '부서명');
+            for (const [value, label] of [['active', '활성'], ['inactive', '비활성']]) { const option = el('option', label); option.value = value; state.append(option); }
+            state.value = department.status; state.setAttribute('aria-label', '부서 상태');
+            const save = el('button', '저장', 'secondary-button'); save.type = 'submit';
+            row.append(name, state, save); row.addEventListener('submit', async event => { event.preventDefault(); save.disabled = true; try { await api(`/api/companies/${encodeURIComponent(company.id)}/departments/${encodeURIComponent(department.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.value, status: state.value }) }); await renderCompanyWorkspace(); } catch (error) { status.textContent = error.status === 409 ? '같은 이름의 부서가 이미 있습니다.' : '부서를 수정하지 못했습니다.'; save.disabled = false; } });
+            list.append(row);
+          }
+          const add = el('form', '', 'my-company-form'), addName = formField(add, 'name', '새 부서명', '', { maxLength: 100 }), addButton = el('button', '부서 추가', 'primary-button'); addButton.type = 'submit'; add.append(addButton);
+          add.addEventListener('submit', async event => { event.preventDefault(); addButton.disabled = true; try { await api(`/api/companies/${encodeURIComponent(company.id)}/departments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: addName.value }) }); await renderCompanyWorkspace(); } catch (error) { status.textContent = error.status === 409 ? '같은 이름의 부서가 이미 있습니다.' : '부서를 추가하지 못했습니다.'; addButton.disabled = false; } });
+          card.append(list, add);
+        }
+        connected.append(card);
+      }
+      content.append(connected);
+
+      if (operatorData) {
+        const operator = el('section', '', 'my-company-section'); operator.append(el('h2', 'HSSO 운영자 · 회사 관리자 신청 관리'), el('p', `전체 ${operatorData.total}건`, 'my-secondary'));
+        for (const item of operatorData.applications) {
+          const card = el('article', '', 'my-application-card');
+          card.append(el('h3', `${item.companyName} · ${APPLICATION_STATUS[item.status]}`), el('p', `${item.applicantName} (${item.applicantEmail}) · ${item.departmentName} · ${item.positionTitle}`, 'my-secondary'), el('p', `신청 사유: ${item.reason}`));
+          if (item.additionalInfo) card.append(el('p', `추가 확인정보: ${item.additionalInfo}`));
+          card.append(el('p', `신청일: ${date(item.createdAt)}${item.reviewerName ? ` · 처리자: ${item.reviewerName} · 처리일: ${date(item.reviewedAt)}` : ''}`, 'my-secondary'));
+          if (item.reviewNote) card.append(el('p', `처리 의견: ${item.reviewNote}`, 'my-secondary'));
+          if (item.status === 'pending') {
+            const form = el('form', '', 'my-company-form'), note = formField(form, 'reviewNote', '처리 의견 / 반려 사유', '', { textarea: true, maxLength: 2000, required: false, rows: 3 }), actions = el('div', '', 'my-actions'), approve = el('button', '승인', 'primary-button'), reject = el('button', '반려', 'secondary-button');
+            approve.type = reject.type = 'button'; actions.append(approve, reject); form.append(actions);
+            approve.addEventListener('click', async () => { approve.disabled = reject.disabled = true; try { await api(`/api/admin/company-admin-applications/${encodeURIComponent(item.id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewNote: note.value }) }); await renderCompanyWorkspace(); } catch { status.textContent = '신청을 승인하지 못했습니다.'; approve.disabled = reject.disabled = false; } });
+            reject.addEventListener('click', async () => { if (!note.value.trim()) { note.required = true; note.reportValidity(); return; } approve.disabled = reject.disabled = true; try { await api(`/api/admin/company-admin-applications/${encodeURIComponent(item.id)}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewNote: note.value }) }); await renderCompanyWorkspace(); } catch { status.textContent = '신청을 반려하지 못했습니다.'; approve.disabled = reject.disabled = false; } });
+            card.append(form);
+          }
+          operator.append(card);
+        }
+        content.append(operator);
+      }
+    } catch (error) {
+      if (version !== generation || root.hidden) return;
+      if (error.status === 401) { loginRequired('회사·권한 관리를 이용하려면 로그인이 필요합니다.'); return; }
+      status.textContent = '회사·권한 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
+    }
+  }
   async function load() {
     const version = ++generation; clearContent(); status.textContent = '불러오는 중입니다.';
     $('#my-nav').hidden = true;
@@ -181,6 +274,7 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
       if (current === 'profile') {
         renderProfile(); return;
       }
+      if (current === 'company') { await renderCompanyWorkspace(); return; }
       if (current === 'risk') { const data=await api('/api/risk-surveys'); if(version!==generation||root.hidden)return; status.textContent=''; await riskWorkspace(data); return; }
       const params = new URLSearchParams(current === 'dashboard' ? {period:'90',limit:'5'} : {...filters,limit:'20',offset:String(offset)});
       const data = await api('/api/documents?' + params);
