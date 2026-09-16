@@ -354,9 +354,10 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
         heading(`안녕하세요, ${user.name}님.`,[user.companyName,user.departmentName,user.position].filter(Boolean).join(' · '));
         const summary = el('div','','my-summary');
         for (const [key,label] of Object.entries(TYPES)) { const item = el('section'); item.append(el('h2',label),el('strong',`${data.summary[key]}건`),el('p','최근 90일 저장 문서','my-secondary')); summary.append(item); }
-        const riskData=await api('/api/risk-surveys'); if(version!==generation||root.hidden)return;
+        const [riskData,pointData]=await Promise.all([api('/api/risk-surveys'),api('/api/points').catch(()=>null)]); if(version!==generation||root.hidden)return;
         const risk = el('section'); risk.append(el('h2','위험성평가'),el('strong',`${riskData.summary.active}개 진행 중`),el('p',`전체 응답 ${riskData.summary.responses}건`,'my-secondary')); summary.append(risk); content.append(summary,el('h2','최근 문서'));
         content.append(data.documents.length ? rowList(data.documents,data.serverNow,false) : empty());
+        if(pointData){const points=el('section','','my-company-section');points.append(el('h2','안전 포인트'),el('strong',`${pointData.total} P`),el('h3','최근 내역'));if(pointData.entries.length){const list=el('div','','my-document-list');for(const entry of pointData.entries){const row=el('div','','my-document-row');row.append(el('strong',`${entry.amount>0?'+':''}${entry.amount}P`),el('span',entry.reason==='quiz_correct'?'오늘의 안전보건 퀴즈':entry.reason),el('span',date(entry.createdAt),'my-secondary'));list.append(row);}points.append(list);}else points.append(el('p','아직 포인트 내역이 없습니다.','my-secondary'));content.append(points);}
       } else {
         heading('내 문서','HSSO에서 만든 문서를 최근 3개월(90일) 동안 확인할 수 있습니다.');
         const form = el('form','','my-filters');

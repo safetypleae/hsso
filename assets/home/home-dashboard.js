@@ -5,6 +5,8 @@ const closeButton = document.querySelector('#portal-menu-close');
 const headerSession = document.querySelector('#header-session');
 const recentRoot = document.querySelector('#home-recent-documents');
 const dashboardRoot = document.querySelector('#home-personal-dashboard');
+const quizRoot = document.querySelector('#home-daily-quiz');
+const safetyPoints = document.querySelector('#home-safety-points');
 let menuWasOpenedBy;
 let dashboardVersion = 0;
 
@@ -196,12 +198,12 @@ function renderDashboard(user, documents, risk) {
   dashboardRoot.replaceChildren(wrap);
 }
 
-function renderHeroMetrics(documents, risk) {
+function renderHeroMetrics(documents, risk, points) {
   const root = document.querySelector('#home-portal-metrics');
   const documentCount = Number(documents.summary.warning_label || 0) + Number(documents.summary.process_guide || 0);
   const values = [['최근 저장 문서', `${documentCount}건`]];
   if (risk) values.push(['진행 중 위험성평가', `${risk.summary.active}건`]);
-  values.push(['안전 포인트', '준비 중']);
+  values.push(['안전 포인트', `${points} P`]);
   root.replaceChildren();
   for (const [label, value] of values) { const item = document.createElement('span'); item.append(node('small', label), node('strong', value)); root.append(item); }
   root.hidden = false;
@@ -249,14 +251,35 @@ async function refreshHomeDashboard() {
   document.querySelector('#header-user-org').textContent = [user.companyName, user.departmentName].filter(Boolean).join(' · ');
   const documentsPromise = request('/api/documents?period=90&limit=5');
   const riskPromise = request('/api/risk-surveys').catch(() => null);
+  const pointsPromise = request('/api/points').catch(() => null);
   let documents;
   try { documents = await documentsPromise; }
   catch { if (version === dashboardVersion) { empty(recentRoot, '최근 사용 양식을 불러오지 못했습니다.'); empty(dashboardRoot, '개인 업무 정보를 불러오지 못했습니다.'); } return; }
-  const risk = await riskPromise;
+  const [risk,pointData] = await Promise.all([riskPromise,pointsPromise]);
   if (version !== dashboardVersion) return;
   renderRecent(documents.documents);
   renderDashboard(user, documents, risk);
-  renderHeroMetrics(documents, risk);
+  const points=pointData?.total??0;safetyPoints.textContent=`${points} P`;
+  renderHeroMetrics(documents, risk, points);
+}
+
+function quizMetadata(quiz){return [quiz.category,quiz.difficulty].filter(Boolean).join(' · ');}
+function renderQuizResult(quiz,result) {
+  const completed=node('strong','오늘의 퀴즈 참여 완료','portal-quiz-completed'),metadata=quizMetadata(quiz),question=node('p',`Q. ${quiz.question}`,'portal-quiz-question'),options=node('div','','portal-quiz-options portal-quiz-review');
+  for(const [key,text] of Object.entries(quiz.options)){const item=node('div',`${key}. ${text}`);if(key===result.selectedOption)item.classList.add('is-selected');if(key===result.correctOption)item.classList.add('is-correct');options.append(item);}
+  const message=node('p',result.isCorrect?'정답입니다! +10P':`아쉽습니다. 정답: ${result.correctAnswer}`,result.isCorrect?'portal-quiz-correct':'portal-quiz-wrong'),explanation=node('div','','portal-quiz-explanation');explanation.append(node('strong','오늘의 해설'),node('p',result.explanation));
+  quizRoot.replaceChildren(completed,...(metadata?[node('p',metadata,'portal-quiz-metadata')]:[]),question,options,node('p',`내가 선택한 답: ${result.selectedOption}. ${quiz.options[result.selectedOption]}`,'portal-quiz-answer'),message,explanation);
+}
+
+async function refreshDailyQuiz(){
+  let data;try{data=await request('/api/daily-quiz');}catch{quizRoot.replaceChildren(node('p','오늘의 퀴즈를 불러오지 못했습니다.'));return;}
+  if(!data.quiz){quizRoot.replaceChildren(node('p','오늘의 퀴즈가 준비 중입니다.'));return;}
+  if(data.attempt){renderQuizResult(data.quiz,data.attempt);return;}
+  const form=document.createElement('form'),metadata=quizMetadata(data.quiz),question=node('p',`Q. ${data.quiz.question}`,'portal-quiz-question'),options=node('div','','portal-quiz-options');
+  for(const [key,text] of Object.entries(data.quiz.options)){const label=document.createElement('label'),input=document.createElement('input');input.type='radio';input.name='selectedOption';input.value=key;input.required=true;label.append(input,node('span',text));options.append(label);}
+  const message=node('p','','portal-quiz-message'),submit=node('button','정답 제출');submit.type='submit';if(metadata)form.append(node('p',metadata,'portal-quiz-metadata'));form.append(question,options,message,submit);
+  form.addEventListener('submit',async event=>{event.preventDefault();const selected=new FormData(form).get('selectedOption');if(!selected){message.textContent='답을 선택해주세요.';return;}submit.disabled=true;try{const response=await fetch('/api/daily-quiz',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({quizId:data.quiz.id,selectedOption:selected}),credentials:'same-origin',mode:'same-origin',redirect:'error'}),body=await response.json().catch(()=>null);if(response.status===401){message.textContent='로그인하면 정답 제출과 포인트 적립이 가능합니다.';const login=node('button','로그인');login.type='button';login.addEventListener('click',()=>document.querySelector('#header-login').click());form.append(login);return;}if(!response.ok||!body?.ok)throw new Error();renderQuizResult(data.quiz,body.result);if(body.result.pointsAwarded)refreshHomeDashboard();}catch{message.textContent='답안을 제출하지 못했습니다.';submit.disabled=false;}});
+  quizRoot.replaceChildren(form);
 }
 
 const sessionObserver = new MutationObserver(() => {
@@ -266,6 +289,7 @@ const sessionObserver = new MutationObserver(() => {
     document.querySelector('#header-user-org').textContent = '';
     document.querySelector('#home-welcome').textContent = '오늘도 안전한 하루 보내세요.';
     document.querySelector('#home-portal-metrics').hidden = true;
+    safetyPoints.textContent='로그인 후 확인';
     empty(recentRoot, '로그인하면 최근 사용 양식을 확인할 수 있습니다.');
     dashboardRoot.replaceChildren(node('p', '로그인하면 개인 대시보드를 사용할 수 있습니다.', 'portal-empty'));
     const login = node('button', '로그인', 'portal-login-link'); login.type = 'button'; login.addEventListener('click', () => document.querySelector('#header-login').click()); dashboardRoot.append(login);
@@ -273,5 +297,6 @@ const sessionObserver = new MutationObserver(() => {
 });
 sessionObserver.observe(headerSession, { attributes: true, attributeFilter: ['hidden'] });
 refreshHomeDashboard();
+refreshDailyQuiz();
 refreshHomeBoards();
 window.addEventListener('hsso:boards-changed', refreshHomeBoards);

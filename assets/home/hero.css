@@ -309,6 +309,25 @@ body:has(#home:not([hidden])) .portal-account span { grid-column: 2; color: #9db
 .portal-screen-primary .portal-quiz > span { color: #9ed6ca; }
 .portal-screen-primary .portal-quiz p { color: #b8cecf; }
 .portal-screen-primary .portal-quiz button { color: #d7ece7; background: rgba(45,151,132,.25); }
+.portal-quiz #home-daily-quiz { position: relative; z-index: 1; font-size: 11px; }
+.portal-screen-primary .portal-quiz:has(#home-daily-quiz) h2 { margin: 12px 0 6px; font-size: 16px; }
+.portal-screen-primary .portal-quiz:has(#home-daily-quiz)::after { display: none; }
+.portal-quiz #home-daily-quiz p { margin: 6px 0; line-height: 1.45; }
+.portal-quiz .portal-quiz-question { color: #f3f8f8; font-weight: 600; }
+.portal-quiz-options { display: grid; gap: 3px; margin-top: 6px; }
+.portal-quiz-options label { display: flex; align-items: flex-start; gap: 5px; color: #cfe0df; line-height: 1.3; }
+.portal-quiz-options input { margin: 1px 0 0; accent-color: #54b9a5; }
+.portal-quiz #home-daily-quiz button { min-height: 28px; margin-top: 7px; padding: 5px 10px; }
+.portal-quiz .portal-quiz-correct { color: #9ee0bf; font-weight: 700; }
+.portal-quiz .portal-quiz-wrong { color: #ffd1c8; font-weight: 700; }
+.portal-quiz .portal-quiz-explanation { color: #c5d8d8; }
+.portal-quiz-metadata { color: #9ed6ca !important; font-size: 10px; font-weight: 700; letter-spacing: .06em; }
+.portal-quiz-completed { display: block; margin-bottom: 5px; color: #9ed6ca; font-size: 11px; }
+.portal-quiz-review div { padding: 3px 5px; border-radius: 3px; color: #cfe0df; }
+.portal-quiz-review .is-selected { outline: 1px solid rgba(255,255,255,.35); }
+.portal-quiz-review .is-correct { color: #b9f0d3; background: rgba(45,151,132,.22); }
+.portal-quiz-answer { color: #d6e4e4 !important; }
+.portal-quiz-explanation > strong { color: #f3f8f8; }
 .portal-screen-primary .portal-next { color: #c3d8d8; }
 
 @media (min-width: 1001px) {
@@ -501,4 +520,9 @@ body:has(#home:not([hidden])) .header-account { margin-left: auto; }
   .site-footer { scroll-snap-align: none; }
   .portal-screen-primary .portal-first-grid { display: grid; grid-template-columns: clamp(300px,23vw,340px) clamp(370px,30vw,430px); justify-content: center; align-items: end; column-gap: 24px; box-sizing: border-box; padding-bottom: 92px; }
   .portal-screen-primary .portal-floating-notice, .portal-screen-primary .portal-recent { position: static; width: auto; height: 184px !important; transform: none; }
+  .portal-screen-primary .portal-quiz { width: clamp(270px,21vw,305px); height: auto !important; min-height: 300px; overflow: visible; }
+}
+
+@media (min-width: 1001px) and (max-width: 1150px) {
+  .portal-screen-primary .portal-quiz { width: 240px; }
 }

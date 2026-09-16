@@ -19,6 +19,7 @@ import { onRequest as login } from '../functions/api/auth/login.js';
 import { onRequest as logout } from '../functions/api/auth/logout.js';
 import { onRequest as me } from '../functions/api/auth/me.js';
 import { surveyCollection } from '../server/risk-surveys.js';
+import { dailyQuiz, points, kstDate } from '../server/daily-quiz.js';
 
 const browserPath=process.env.HSSO_BROWSER;
 test('local browser: protected dashboard, documents, adapters and responsive navigation', {skip:!browserPath,timeout:60000}, async t=>{
@@ -26,6 +27,9 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
   const db=createTestDB();t.after(()=>db.close());
   db.sqlite.exec(await readFile(new URL('../migrations/0002_saved_documents.sql',import.meta.url),'utf8'));
   db.sqlite.exec(await readFile(new URL('../migrations/0003_risk_assessment.sql',import.meta.url),'utf8'));
+  db.sqlite.exec(await readFile(new URL('../migrations/0012_quiz_points.sql',import.meta.url),'utf8'));
+  db.sqlite.exec(await readFile(new URL('../migrations/0013_quiz_metadata.sql',import.meta.url),'utf8'));
+  db.sqlite.prepare('INSERT INTO daily_quizzes (id,quiz_date,question,option_a,option_b,option_c,option_d,correct_option,explanation,is_active,created_at,category,difficulty) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(crypto.randomUUID(),kstDate(),'작업 전 보호구가 손상된 것을 발견했다면 어떻게 해야 합니까?','관리자에게 알리고 교체한다','그대로 사용한다','테이프로 임시 수리한다','동료 보호구를 몰래 사용한다','A','손상된 보호구는 보호 성능을 보장할 수 없으므로 보고 후 적합한 제품으로 교체해야 합니다.',1,new Date().toISOString(),'보호구','중급');
   // URL paths may contain Korean or spaces; use fileURLToPath for the actual filesystem root.
   const {fileURLToPath}=await import('node:url');const project=fileURLToPath(new URL('..',import.meta.url));
   let base;let failDocuments=false;
@@ -38,7 +42,7 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
       if(url.pathname.startsWith('/api/')) {
         const chunks=[];for await(const chunk of req)chunks.push(chunk);
         const request=new Request(url,{method:req.method,headers:req.headers,...(['GET','HEAD'].includes(req.method)?{}:{body:Buffer.concat(chunks)})});
-        const handlers={'/api/auth/email-code':sendCode,'/api/auth/verify-email':verifyEmailCode,'/api/auth/profile':updateProfile,'/api/auth/signup':signup,'/api/auth/login':login,'/api/auth/logout':logout,'/api/auth/me':me,'/api/documents':collection,'/api/risk-surveys':surveyCollection};
+        const handlers={'/api/auth/email-code':sendCode,'/api/auth/verify-email':verifyEmailCode,'/api/auth/profile':updateProfile,'/api/auth/signup':signup,'/api/auth/login':login,'/api/auth/logout':logout,'/api/auth/me':me,'/api/documents':collection,'/api/risk-surveys':surveyCollection,'/api/daily-quiz':dailyQuiz,'/api/points':points};
         const handler=handlers[url.pathname] || (url.pathname.startsWith('/api/documents/')?item:null);
         if(!handler){res.writeHead(404).end();return;}
         const response=failDocuments&&url.pathname==='/api/documents'?Response.json({ok:false,error:'INTERNAL_SERVER_ERROR'},{status:500}):await handler({request,env:verificationEnv,params:{id:url.pathname.split('/')[3]}});
@@ -152,7 +156,7 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
       await click(`[data-my-section="${section}"]`);await ready();assert((await evaluate(`document.querySelector('#my-content').textContent`)).includes(text));assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`),true,`${section} overflow ${width}`);
     }
     await evaluate(`[...document.querySelectorAll('#my-content button')].find(b=>b.textContent==='+ 새 설문 만들기').click()`);assert.equal(await evaluate(`location.hash`),'#risk-survey-create');
-    await click('.logo');assert.equal(await evaluate(`document.querySelector('#home').hidden`),false);
+    await click('.logo');assert.equal(await evaluate(`document.querySelector('#home').hidden`),false);await wait(`document.querySelectorAll('#home-daily-quiz label').length===4`);assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth`),true,`quiz overflow ${width}`);
     if(width<=900)await click('.menu-button');await click('#msds-menu-button');assert.equal(await evaluate(`document.querySelector('#msds-menu').hidden`),false);
     await click('[data-view-link="risk-assessment"]');assert.equal(await evaluate(`document.querySelector('#risk-assessment').hidden`),false);
   }
