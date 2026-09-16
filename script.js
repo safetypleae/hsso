@@ -2928,7 +2928,7 @@ document.querySelectorAll('[data-view-link]').forEach((link) => {
 
 window.addEventListener('popstate', () => {
   showAppView(window.location.hash.slice(1) || 'home');
-  if (['#home-tools', '#home-about'].includes(window.location.hash)) scrollToHomeSection(window.location.hash.slice(1));
+  if (['#home-tools', '#home-about', '#systems'].includes(window.location.hash)) scrollToHomeSection(window.location.hash.slice(1));
 });
 
 function scrollToHomeSection(id) {
@@ -2950,7 +2950,7 @@ document.querySelectorAll('[data-home-tools], [data-home-section]').forEach((lin
 
 if (window.location.hash === '#maker') showAppView('maker');
 if (window.location.hash === '#mypage') showAppView('mypage');
-if (['#home-tools', '#home-about'].includes(window.location.hash)) scrollToHomeSection(window.location.hash.slice(1));
+if (['#home-tools', '#home-about', '#systems'].includes(window.location.hash)) scrollToHomeSection(window.location.hash.slice(1));
 if (window.location.hash === '#process-guide') showAppView('process-guide');
 if (window.location.hash === '#risk-assessment') showAppView('risk-assessment');
 if (window.location.hash === '#risk-survey-create') showAppView('risk-survey-create');

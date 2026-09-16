@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="/assets/risk/qr.css">
   <link rel="stylesheet" href="/assets/risk/builder.css">
   <link rel="stylesheet" href="/assets/home/hero.css">
+  <link rel="stylesheet" href="/assets/home/systems.css">
   <link rel="stylesheet" href="/assets/boards.css">
 </head>
 <body>
@@ -23,7 +24,7 @@
       </div>
       <button class="menu-button" type="button" aria-expanded="false" aria-controls="main-menu">메뉴</button>
       <nav id="main-menu" class="main-nav" aria-label="주요 메뉴">
-        <a href="#home-about" data-home-section="home-about">소개</a>
+        <a href="#systems" data-home-section="systems">소개</a>
         <div class="nav-dropdown">
           <button id="msds-menu-button" class="nav-dropdown-trigger" type="button" aria-expanded="false" aria-controls="msds-menu">MSDS <span class="nav-chevron" aria-hidden="true"></span></button>
           <div id="msds-menu" class="nav-submenu" hidden>
@@ -52,12 +53,22 @@
       <section><h3>MSDS</h3><a href="#maker" data-view-link="maker">경고표지 만들기</a><a href="#process-guide" data-view-link="process-guide">작업공정별 관리요령</a><button type="button" class="msds-unavailable" disabled>MSDS 관리대장 <small>준비 중</small></button></section>
       <section><h3>위험성평가</h3><a href="#risk-assessment" data-view-link="risk-assessment">위험성평가</a><a href="#risk-survey-create" data-view-link="risk-survey-create">설문 만들기</a></section>
       <section><h3>MY HSSO</h3><a href="#mypage" data-view-link="mypage">마이페이지</a><button type="button" data-home-my-section="documents">내 문서</button><button type="button" data-home-my-section="risk">위험성평가 관리</button></section>
-      <section><h3>기타</h3><a href="#home-about" data-home-section="home-about">소개</a><a href="#login" data-view-link="login">로그인</a><a href="#signup" data-view-link="signup">회원가입</a></section>
+      <section><h3>기타</h3><a href="#systems" data-home-section="systems">소개</a><a href="#login" data-view-link="login">로그인</a><a href="#signup" data-view-link="signup">회원가입</a></section>
     </nav>
   </aside>
 
   <main id="home" class="home-view" aria-labelledby="home-title">
     <section class="portal-screen portal-screen-primary is-active" aria-labelledby="home-title">
+      <div class="hsso-ambient-scene" aria-hidden="true">
+        <span class="hsso-ambient-glow hsso-ambient-glow-a"></span>
+        <span class="hsso-ambient-glow hsso-ambient-glow-b"></span>
+        <span class="hsso-ambient-glow hsso-ambient-glow-c"></span>
+        <svg class="hsso-safety-network" viewBox="0 0 1440 760" preserveAspectRatio="xMidYMid slice">
+          <g class="hsso-network-lines"><path d="M78 190 250 112 414 208 603 129 777 236 975 142 1170 245 1365 164"/><path d="M151 531 335 416 532 514 728 384 932 526 1127 401 1324 512"/><path d="M250 112 335 416M414 208 532 514M603 129 728 384M777 236 932 526M975 142 1127 401M1170 245 1324 512"/></g>
+          <g class="hsso-network-nodes"><circle cx="78" cy="190" r="3"/><circle cx="250" cy="112" r="4"/><circle cx="414" cy="208" r="3"/><circle cx="603" cy="129" r="3"/><circle cx="777" cy="236" r="4"/><circle cx="975" cy="142" r="3"/><circle cx="1170" cy="245" r="4"/><circle cx="1365" cy="164" r="3"/><circle cx="151" cy="531" r="3"/><circle cx="335" cy="416" r="4"/><circle cx="532" cy="514" r="3"/><circle cx="728" cy="384" r="4"/><circle cx="932" cy="526" r="3"/><circle cx="1127" cy="401" r="4"/><circle cx="1324" cy="512" r="3"/></g>
+        </svg>
+        <span class="hsso-ambient-scan"></span>
+      </div>
       <div class="portal-shell">
         <header class="portal-brand"><p>SAFETY &amp; HEALTH WORK PORTAL</p><h1 id="home-title">HSSO<span>.</span></h1><strong id="home-welcome">오늘도 안전한 하루 보내세요.</strong><small>안전보건 실무를 더 빠르고 정확하게.</small><div id="home-portal-metrics" class="portal-hero-metrics" hidden></div></header>
         <div class="portal-first-grid">
@@ -84,9 +95,71 @@
         <section id="home-about" class="portal-about" tabindex="-1"><strong>ABOUT HSSO</strong><p>반복적인 안전보건 실무를 줄이고, 현장에 더 가까운 업무 환경을 만듭니다.</p></section>
       </div>
     </section>
+  <section id="systems" class="portal-screen hsso-systems" aria-labelledby="hsso-systems-title" tabindex="-1">
+    <div class="section-shell">
+      <header class="hsso-systems-heading">
+        <p>HSSO WORKPLACE SYSTEM</p>
+        <h2 id="hsso-systems-title">안전보건 업무를, 하나의 흐름으로.</h2>
+        <p>화학물질 관리부터 위험성평가, 안전보건 업무까지<br>흩어진 업무를 HSSO에서 더 체계적으로 관리하세요.</p>
+      </header>
+      <div class="hsso-systems-grid">
+        <article class="hsso-system-card hsso-system-chemical">
+          <header><p>CHEMICAL SAFETY</p><h3>화학물질 통합관리</h3><span class="hsso-system-state is-current">일부 기능 사용 가능</span></header>
+          <p class="hsso-system-description">사업장에서 사용하는 화학물질과 MSDS 정보를 한곳에서 체계적으로 관리합니다.</p>
+          <div class="hsso-system-visual hsso-chemical-viz" aria-hidden="true">
+            <small class="hsso-viz-caption">MSDS DATA FLOW · 구조 예시</small>
+            <span class="hsso-viz-node hsso-chem-input">MSDS<em>DOCUMENT</em></span>
+            <span class="hsso-viz-core hsso-chem-core">ANALYZE<i></i></span>
+            <span class="hsso-viz-node hsso-chem-output output-ghs">GHS</span>
+            <span class="hsso-viz-node hsso-chem-output output-hazard">유해성</span>
+            <span class="hsso-viz-node hsso-chem-output output-legal">법정관리</span>
+            <span class="hsso-viz-node hsso-chem-output output-dept">부서 사용</span>
+            <span class="hsso-viz-node hsso-chem-output output-guide">관리요령</span>
+            <i class="hsso-flow-line chem-in"></i><i class="hsso-flow-line chem-a"></i><i class="hsso-flow-line chem-b"></i><i class="hsso-flow-line chem-c"></i><i class="hsso-flow-line chem-d"></i><i class="hsso-flow-line chem-e"></i>
+            <b class="hsso-diamond one"></b><b class="hsso-diamond two"></b>
+          </div>
+          <div class="hsso-system-features"><a href="#maker" data-view-link="maker">GHS 경고표지 <small>사용 가능</small></a><a href="#process-guide" data-view-link="process-guide">작업공정별 관리요령 <small>사용 가능</small></a><span>MSDS 관리대장 <small>확장 예정</small></span><span>함유물질·법정관리 <small>확장 예정</small></span></div>
+        </article>
+
+        <article class="hsso-system-card hsso-system-risk">
+          <header><p>RISK INTELLIGENCE</p><h3>위험성평가 통합관리</h3><span class="hsso-system-state is-current">현재 사용 가능</span></header>
+          <p class="hsso-system-description">현장의 위험을 발견하고 평가하여 개선조치까지 하나의 흐름으로 연결합니다.</p>
+          <div class="hsso-system-visual hsso-risk-viz" aria-hidden="true">
+            <small class="hsso-viz-caption">DETECT · ASSESS · IMPROVE</small>
+            <span class="hsso-viz-node hsso-risk-source">현장</span>
+            <span class="hsso-viz-node hsso-risk-item risk-high">추락<em>HIGH</em></span>
+            <span class="hsso-viz-node hsso-risk-item risk-medium">끼임<em>MEDIUM</em></span>
+            <span class="hsso-viz-node hsso-risk-item risk-low">미끄러짐<em>LOW</em></span>
+            <span class="hsso-viz-core hsso-risk-core">RISK<em>ASSESS</em><i></i></span>
+            <span class="hsso-viz-node hsso-risk-action">개선조치</span>
+            <span class="hsso-risk-complete">✓<em>완료</em></span>
+            <i class="hsso-flow-line risk-a"></i><i class="hsso-flow-line risk-b"></i><i class="hsso-flow-line risk-c"></i><i class="hsso-flow-line risk-d"></i><i class="hsso-flow-line risk-e"></i>
+          </div>
+          <div class="hsso-system-features"><a href="#risk-assessment" data-view-link="risk-assessment">위험성평가 <small>사용 가능</small></a><a href="#risk-survey-create" data-view-link="risk-survey-create">근로자 의견수렴 <small>사용 가능</small></a><span>개선조치·평가 통계 <small>연결 기능</small></span><span>TBM 연계 <small>확장 예정</small></span></div>
+        </article>
+
+        <article class="hsso-system-card hsso-system-management">
+          <header><p>WORKPLACE HEALTH &amp; SAFETY</p><h3>안전보건 통합관리</h3><span class="hsso-system-state">확장 예정</span></header>
+          <p class="hsso-system-description">흩어진 안전보건 업무와 법정 관리사항을 한눈에 확인하고 관리할 수 있도록 합니다.</p>
+          <div class="hsso-system-visual hsso-health-viz" aria-hidden="true">
+            <small class="hsso-viz-caption">CONNECTED CONTROL CENTER · UI EXAMPLE</small>
+            <span class="hsso-viz-node hsso-health-node health-exam">건강진단<i></i></span>
+            <span class="hsso-viz-node hsso-health-node health-training">교육<i></i></span>
+            <span class="hsso-viz-node hsso-health-node health-measure">작업환경측정<i></i></span>
+            <span class="hsso-viz-node hsso-health-node health-muscle">근골격계 조사<i></i></span>
+            <span class="hsso-viz-core hsso-health-core">H&amp;S<em>CORE</em><i></i></span>
+            <div class="hsso-health-status"><small>WORKPLACE STATUS</small><span><b>예정</b><strong>03</strong></span><span><b>진행</b><strong>02</strong></span><span><b>완료</b><strong>18</strong></span></div>
+            <i class="hsso-flow-line health-a"></i><i class="hsso-flow-line health-b"></i><i class="hsso-flow-line health-c"></i><i class="hsso-flow-line health-d"></i>
+          </div>
+          <div class="hsso-system-features"><span>보호구 관리 <small>확장 예정</small></span><span>점검 및 개선조치 <small>확장 예정</small></span><span>법정업무 일정 <small>확장 예정</small></span><span>업무 현황 Dashboard <small>확장 예정</small></span></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
     <nav class="portal-page-controls" aria-label="홈 화면 전환">
       <button id="portal-page-up" type="button" aria-label="이전 포털 화면" disabled><span aria-hidden="true">↑</span></button>
-      <span id="portal-page-indicator" aria-live="polite">1 / 2</span>
+      <span id="portal-page-indicator" aria-live="polite">1 / 3</span>
       <button id="portal-page-down" type="button" aria-label="다음 포털 화면"><span aria-hidden="true">↓</span></button>
     </nav>
   </main>

@@ -160,6 +160,86 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
     if(width<=900)await click('.menu-button');await click('#msds-menu-button');assert.equal(await evaluate(`document.querySelector('#msds-menu').hidden`),false);
     await click('[data-view-link="risk-assessment"]');assert.equal(await evaluate(`document.querySelector('#risk-assessment').hidden`),false);
   }
+  // Home system overview: preserve the portal foreground and verify 1/2/3 navigation and responsive visuals.
+  for(const width of [1920,1440,1024,768,390]) {
+    await cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
+    await cdp('Page.navigate',{url:base+'/'});
+    await wait(`document.querySelectorAll('.hsso-system-card').length===3 && !document.querySelector('#home').hidden`);
+    await wait(`document.querySelectorAll('#home-daily-quiz label').length===4`);
+    const firstPage=await evaluate(`(()=>{
+      const scene=document.querySelector('.hsso-ambient-scene'),shell=document.querySelector('.portal-screen-primary > .portal-shell');
+      return {page:document.querySelector('#home').dataset.portalPage,indicator:document.querySelector('#portal-page-indicator').textContent,
+        foreground:[document.querySelector('.portal-brand'),document.querySelector('.portal-floating-notice'),document.querySelector('.portal-recent'),document.querySelector('.portal-quiz')].every(node=>node.getBoundingClientRect().width>0),
+        backgroundSafe:getComputedStyle(scene).position==='absolute'&&getComputedStyle(scene).pointerEvents==='none'&&Number(getComputedStyle(shell).zIndex)>Number(getComputedStyle(scene).zIndex),
+        ambientAnimated:getComputedStyle(scene).animationName==='hsso-ambient-gradient'};
+    })()`);
+    assert.equal(firstPage.foreground,true,`existing home foreground ${width}`);
+    assert.equal(firstPage.backgroundSafe,true,`ambient layering ${width}`);
+    assert.equal(firstPage.ambientAnimated,true,`ambient animation ${width}`);
+    if(width>=1001){assert.equal(firstPage.page,'0');assert.equal(firstPage.indicator,'1 / 3');}
+    await click('.main-nav [data-home-section="systems"]');
+    await wait(width>=1001?`document.querySelector('#home').dataset.portalPage==='2' && document.querySelector('#systems').classList.contains('is-active')`:`location.hash==='#systems' && scrollY>0 && document.querySelector('#systems').getBoundingClientRect().bottom>0`);
+    const homeLayout=await evaluate(`(()=>{
+      const grid=document.querySelector('.hsso-systems-grid');
+      const cards=[...document.querySelectorAll('.hsso-system-card')];
+      return {
+        columns:getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+        systemVisible:getComputedStyle(document.querySelector('.hsso-systems')).visibility!=='hidden',
+        existing:[document.querySelector('.portal-brand'),document.querySelector('.portal-floating-notice'),document.querySelector('.portal-recent'),document.querySelector('.portal-quiz')].every(Boolean),
+        noOverflow:document.documentElement.scrollWidth<=innerWidth && cards.every(card=>card.scrollWidth<=card.clientWidth),
+        descriptionsVisible:cards.every(card=>card.querySelector('.hsso-system-description').getBoundingClientRect().height>0),
+        links:[...document.querySelectorAll('.hsso-system-features a')].every(link=>link.hash && link.dataset.viewLink),
+        visualKinds:['.hsso-chemical-viz','.hsso-risk-viz','.hsso-health-viz'].every(selector=>document.querySelector(selector)?.children.length>=8),
+        idleFlow:getComputedStyle(document.querySelector('.hsso-flow-line'),'::after').animationName==='hsso-data-travel'
+      };
+    })()`);
+    assert.equal(homeLayout.columns,width>=1001?3:width>=701?2:1,`system columns ${width}`);
+    assert.equal(homeLayout.systemVisible,true,`system section visible ${width}`);
+    assert.equal(homeLayout.existing,true,`existing home content ${width}`);
+    assert.equal(homeLayout.noOverflow,true,`system section overflow ${width}`);
+    assert.equal(homeLayout.descriptionsVisible,true,`system copy clipped ${width}`);
+    assert.equal(homeLayout.links,true,`system links ${width}`);
+    assert.equal(homeLayout.visualKinds,true,`system visualization ${width}`);
+    assert.equal(homeLayout.idleFlow,true,`system idle animation ${width}`);
+    if(width>=1001){
+      assert.equal(await evaluate(`document.querySelector('#portal-page-indicator').textContent`),'3 / 3');
+      assert.deepEqual(await evaluate(`({up:document.querySelector('#portal-page-up').disabled,down:document.querySelector('#portal-page-down').disabled})`),{up:false,down:true});
+      await new Promise(resolve=>setTimeout(resolve,740));await click('#portal-page-up');await wait(`document.querySelector('#home').dataset.portalPage==='1'`);
+      assert.equal(await evaluate(`document.querySelector('#portal-page-indicator').textContent`),'2 / 3');
+      await new Promise(resolve=>setTimeout(resolve,740));await click('#portal-page-up');await wait(`document.querySelector('#home').dataset.portalPage==='0'`);
+      assert.equal(await evaluate(`document.querySelector('#portal-page-up').disabled`),true);
+    } else {
+      assert.equal(await evaluate(`getComputedStyle(document.querySelector('.portal-page-controls')).display`),'none');
+      assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-ambient-scene')).getPropertyValue('--hsso-parallax-x').trim()`),'0px');
+    }
+  }
+  await cdp('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+  await cdp('Page.navigate',{url:base+'/'});await wait(`!document.querySelector('#home').hidden`);
+  await new Promise(resolve=>setTimeout(resolve,180));
+  if(await evaluate(`matchMedia('(pointer: fine)').matches`)) {
+    await evaluate(`window.dispatchEvent(new PointerEvent('pointermove',{clientX:1180,clientY:180}))`);
+    await wait(`getComputedStyle(document.querySelector('.hsso-ambient-scene')).getPropertyValue('--hsso-parallax-x').trim()!=='0px'`);
+  } else assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-ambient-scene')).getPropertyValue('--hsso-parallax-x').trim()`),'0px');
+  await click('#portal-page-down');await wait(`document.querySelector('#home').dataset.portalPage==='1'`);
+  assert.equal(await evaluate(`document.querySelector('#portal-page-indicator').textContent`),'2 / 3');
+  await new Promise(resolve=>setTimeout(resolve,740));await click('#portal-page-down');await wait(`document.querySelector('#home').dataset.portalPage==='2'`);
+  assert.equal(await evaluate(`document.querySelector('#portal-page-down').disabled`),true);
+  await cdp('Page.navigate',{url:base+'/'});await wait(`document.querySelector('#home').dataset.portalPage==='0'`);await new Promise(resolve=>setTimeout(resolve,180));
+  await click('.main-nav [data-home-section="systems"]');await wait(`document.querySelector('#home').dataset.portalPage==='2'`);
+  assert.equal(await evaluate(`location.hash`),'#systems');
+  await evaluate(`history.back()`);await wait(`location.hash==='' && document.querySelector('#home').dataset.portalPage==='0'`);
+  await new Promise(resolve=>setTimeout(resolve,740));await evaluate(`history.forward()`);await wait(`location.hash==='#systems' && document.querySelector('#home').dataset.portalPage==='2'`);
+  await evaluate(`document.querySelector('.hsso-system-features a').focus()`);
+  assert.equal(await evaluate(`document.activeElement.matches('.hsso-system-features a')`),true);
+  assert.equal(await evaluate(`[...document.styleSheets].flatMap(sheet=>[...sheet.cssRules]).some(rule=>rule.selectorText==='.hsso-system-card:hover' && rule.style.transform.includes('translateY'))`),true);
+  await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-system-card')).transitionDuration`),'0s');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-system-card')).transform`),'none');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-ambient-scene')).animationName`),'none');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-flow-line'),'::after').animationName`),'none');
+  await cdp('Emulation.setEmulatedMedia',{features:[]});
+  await click('[data-view-link="maker"]');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.hsso-systems')).display`),'none');
   // Profile save/cancel and read-only fields, then MSDS menu styles and interaction.
   for(const width of [1440,390]) {
     await cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});

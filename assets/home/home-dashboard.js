@@ -16,6 +16,8 @@ const portalUp = document.querySelector('#portal-page-up');
 const portalDown = document.querySelector('#portal-page-down');
 const portalIndicator = document.querySelector('#portal-page-indicator');
 const portalDesktop = window.matchMedia('(min-width: 1001px)');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const ambientScene = document.querySelector('.hsso-ambient-scene');
 let portalPage = 0;
 let portalTransitionLocked = false;
 let portalResetSequence = 0;
@@ -24,29 +26,31 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
 function setPortalPage(nextPage, { focus = false, force = false, animate = true } = {}) {
   if (!portalDesktop.matches) return;
-  const page = Math.max(0, Math.min(1, nextPage));
+  const page = Math.max(0, Math.min(portalPanels.length - 1, nextPage));
   if (!force && (page === portalPage || portalTransitionLocked)) return;
   portalTransitionLocked = animate;
   portalPage = page;
   home.classList.toggle('portal-resetting', !animate);
   home.classList.toggle('portal-page-two', page === 1);
+  home.classList.toggle('portal-page-three', page === 2);
   home.dataset.portalPage = String(page);
   portalUp.disabled = page === 0;
-  portalDown.disabled = page === 1;
-  portalIndicator.textContent = `${page + 1} / 2`;
+  portalDown.disabled = page === portalPanels.length - 1;
+  portalIndicator.textContent = `${page + 1} / ${portalPanels.length}`;
   portalPanels.forEach((panel, index) => {
     panel.classList.toggle('is-active', index === page);
     panel.inert = index !== page;
     panel.setAttribute('aria-hidden', String(index !== page));
   });
   if (focus) (page ? portalUp : portalDown).focus({ preventScroll: true });
-  if (animate) setTimeout(() => { portalTransitionLocked = false; }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 20 : 620);
+  if (animate) setTimeout(() => { portalTransitionLocked = false; }, reducedMotion.matches ? 20 : 720);
   else requestAnimationFrame(() => requestAnimationFrame(() => home.classList.remove('portal-resetting')));
 }
 
 function resetPortalMode() {
   if (portalDesktop.matches) {
     home.classList.toggle('portal-page-two', portalPage === 1);
+    home.classList.toggle('portal-page-three', portalPage === 2);
     portalTransitionLocked = false;
     portalPanels.forEach((panel, index) => {
       panel.classList.toggle('is-active', index === portalPage);
@@ -55,13 +59,14 @@ function resetPortalMode() {
     });
   } else {
     home.classList.remove('portal-page-two');
+    home.classList.remove('portal-page-three');
     portalPage = 0;
     portalTransitionLocked = false;
     portalPanels.forEach(panel => { panel.classList.add('is-active'); panel.inert = false; panel.removeAttribute('aria-hidden'); });
   }
   portalUp.disabled = portalPage === 0;
-  portalDown.disabled = portalPage === 1;
-  portalIndicator.textContent = `${portalPage + 1} / 2`;
+  portalDown.disabled = portalPage === portalPanels.length - 1;
+  portalIndicator.textContent = `${portalPage + 1} / ${portalPanels.length}`;
 }
 
 function resetPortalToFirstPage() {
@@ -86,28 +91,55 @@ function resetPortalToFirstPage() {
   }, 150);
 }
 
-portalUp.addEventListener('click', () => setPortalPage(0, { focus: true }));
-portalDown.addEventListener('click', () => setPortalPage(1, { focus: true }));
+function restorePortalLocation() {
+  if (portalDesktop.matches && window.location.hash === '#systems') setPortalPage(2, { force: true, animate: false });
+  else resetPortalToFirstPage();
+}
+
+portalUp.addEventListener('click', () => setPortalPage(portalPage - 1, { focus: true }));
+portalDown.addEventListener('click', () => setPortalPage(portalPage + 1, { focus: true }));
 portalDesktop.addEventListener('change', resetPortalMode);
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', resetPortalToFirstPage, { once: true });
-else resetPortalToFirstPage();
-window.addEventListener('load', resetPortalToFirstPage, { once: true });
-window.addEventListener('pageshow', resetPortalToFirstPage);
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restorePortalLocation, { once: true });
+else restorePortalLocation();
+window.addEventListener('load', restorePortalLocation, { once: true });
+window.addEventListener('pageshow', restorePortalLocation);
+window.addEventListener('popstate', () => {
+  if (!portalDesktop.matches) return;
+  setPortalPage(window.location.hash === '#systems' ? 2 : window.location.hash === '#home-tools' || window.location.hash === '#home-about' ? 1 : 0, { force: true });
+});
 
 document.addEventListener('click', event => {
   if (!portalDesktop.matches) return;
-  const aboutLink = event.target.closest('[data-home-section="home-about"]');
-  if (aboutLink && !home.contains(event.target)) { setTimeout(() => setPortalPage(1), 0); return; }
+  const sectionLink = event.target.closest('[data-home-section]');
+  const targetPage = sectionLink?.dataset.homeSection === 'systems' ? 2 : 1;
+  if (sectionLink && !home.contains(event.target)) { setTimeout(() => setPortalPage(targetPage), 0); return; }
   if (!home.contains(event.target)) return;
   if (event.target.closest('[data-home-tools]')) { event.preventDefault(); event.stopImmediatePropagation(); setPortalPage(1); }
-  else if (aboutLink) { event.preventDefault(); event.stopImmediatePropagation(); closeMenu(false); setPortalPage(1); }
+  else if (sectionLink) { event.preventDefault(); event.stopImmediatePropagation(); closeMenu(false); setPortalPage(targetPage); }
 }, true);
 
 window.addEventListener('wheel', event => {
   if (!portalDesktop.matches || home.hidden || portalTransitionLocked || Math.abs(event.deltaY) < 18) return;
-  if (portalPage === 0 && event.deltaY > 0 && window.scrollY < 4) { event.preventDefault(); setPortalPage(1); }
-  else if (portalPage === 1 && event.deltaY < 0 && window.scrollY < 4) { event.preventDefault(); setPortalPage(0); }
+  if (event.deltaY > 0 && portalPage < portalPanels.length - 1 && window.scrollY < 4) { event.preventDefault(); setPortalPage(portalPage + 1); }
+  else if (event.deltaY < 0 && portalPage > 0 && window.scrollY < 4) { event.preventDefault(); setPortalPage(portalPage - 1); }
 }, { passive: false });
+
+let ambientFrame = 0;
+function updateAmbientParallax(event) {
+  if (!portalDesktop.matches || reducedMotion.matches || !window.matchMedia('(pointer: fine)').matches || home.hidden) return;
+  const x = ((event.clientX / window.innerWidth) - .5) * 10;
+  const y = ((event.clientY / window.innerHeight) - .5) * 8;
+  cancelAnimationFrame(ambientFrame);
+  ambientFrame = requestAnimationFrame(() => {
+    ambientScene.style.setProperty('--hsso-parallax-x', `${x.toFixed(2)}px`);
+    ambientScene.style.setProperty('--hsso-parallax-y', `${y.toFixed(2)}px`);
+  });
+}
+window.addEventListener('pointermove', updateAmbientParallax, { passive: true });
+window.addEventListener('pointerleave', () => {
+  ambientScene.style.setProperty('--hsso-parallax-x', '0px');
+  ambientScene.style.setProperty('--hsso-parallax-y', '0px');
+}, { passive: true });
 
 function openMenu() {
   menuWasOpenedBy = document.activeElement;
