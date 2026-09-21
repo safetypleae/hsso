@@ -1,5 +1,6 @@
 import { json, errorResponse } from './auth-session.js';
 import { authenticate } from './documents.js';
+import { validateCasRegistryNumber } from '../assets/msds-composition-parser.js';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const clean = value => value.trim().replace(/\s+/gu, ' ');
@@ -9,6 +10,16 @@ const quantity = value => value === null || (typeof value === 'number' && Number
 const date = () => new Date().toISOString();
 export const MAX_MSDS_BYTES = 20 * 1024 * 1024;
 const PDF_TYPE = 'application/pdf';
+const CAS_STATUSES = new Set(['KNOWN','ABSENT','TRADE_SECRET']);
+const REVIEW_STATUSES = new Set(['AUTO_EXTRACTED','REVIEWED','MANUALLY_ADDED']);
+const SOURCE_TYPES = new Set(['AUTO','MANUAL']);
+const PARSER_CONFIDENCES = new Set(['high','medium','low']);
+const PARSER_STATUSES = new Set(['SUCCESS','PARTIAL','UNRESOLVED','NO_COMPOSITION_SECTION','VARIANT_TABLE']);
+const BLOCKED_AUTO_STATUSES = new Set(['UNRESOLVED','NO_COMPOSITION_SECTION','VARIANT_TABLE']);
+const ingredientFields = `i.id,i.chemical_name AS chemicalName,i.synonym,i.cas_value AS casValue,i.cas_status AS casStatus,
+ i.amount_raw AS amountRaw,i.trade_secret AS tradeSecret,i.parser_confidence AS parserConfidence,i.review_status AS reviewStatus,
+ i.source_type AS sourceType,i.sort_order AS sortOrder,i.reviewed_by_user_id AS reviewedByUserId,i.reviewed_at AS reviewedAt,
+ i.created_at AS createdAt,i.updated_at AS updatedAt`;
 
 function guard(request, methods) {
   if (!methods.includes(request.method)) return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405, { Allow: methods.join(', ') });
@@ -18,10 +29,10 @@ function guard(request, methods) {
   }
   return null;
 }
-async function input(request) {
+async function input(request,maxBytes=16384) {
   if (request.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw new Error('INVALID_CONTENT_TYPE');
   const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > 16384) throw new Error('PAYLOAD_TOO_LARGE');
+  if (new TextEncoder().encode(raw).byteLength > maxBytes) throw new Error('PAYLOAD_TOO_LARGE');
   return JSON.parse(raw);
 }
 const inputError = error => errorResponse(error.message === 'PAYLOAD_TOO_LARGE' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_INPUT', error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400);
@@ -32,6 +43,48 @@ const failure = error => {
 const hex = bytes => Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2,'0')).join('');
 const isoDate = value => { if(value==='')return true;if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;const parsed=new Date(value+'T00:00:00Z');return !Number.isNaN(parsed.valueOf())&&parsed.toISOString().slice(0,10)===value; };
 const safeFilename = value => value.replace(/[\r\n\0]/g,'').slice(0,255);
+const nullableClean = value => typeof value === 'string' && value.trim() ? clean(value) : null;
+const normalizedCas = value => clean(value).replace(/\s+/gu,'').replace(/[‐‑‒–—―]/gu,'-');
+
+function normalizeIngredients(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.ingredients) || value.ingredients.length > 100) return null;
+  const parserStatus = typeof value.parserStatus === 'string' ? value.parserStatus : null;
+  if (parserStatus!==null&&!PARSER_STATUSES.has(parserStatus)) return null;
+  const ingredients=[];
+  for (const row of value.ingredients) {
+    if (!row || !text(row.chemicalName,500,true) || !text(row.synonym ?? '',500) || !text(row.amountRaw ?? '',200)
+      || !CAS_STATUSES.has(row.casStatus) || !REVIEW_STATUSES.has(row.reviewStatus) || !SOURCE_TYPES.has(row.sourceType)
+      || typeof row.tradeSecret !== 'boolean') return null;
+    const confidence=row.parserConfidence ?? null;
+    if (confidence!==null&&!PARSER_CONFIDENCES.has(confidence)) return null;
+    if (row.sourceType==='MANUAL'&&(row.reviewStatus!=='MANUALLY_ADDED'||confidence!==null)) return null;
+    if (row.sourceType==='AUTO'&&row.reviewStatus==='MANUALLY_ADDED') return null;
+    if (BLOCKED_AUTO_STATUSES.has(parserStatus)&&row.sourceType==='AUTO') return null;
+    const rawCas=typeof row.casValue==='string'?row.casValue.trim():'';
+    if (row.casStatus==='KNOWN'&&(!rawCas||!validateCasRegistryNumber(rawCas))) return null;
+    if (row.casStatus!=='KNOWN'&&rawCas) return null;
+    ingredients.push({
+      chemicalName:clean(row.chemicalName),synonym:nullableClean(row.synonym),casValue:rawCas?normalizedCas(rawCas):null,
+      casStatus:row.casStatus,amountRaw:clean(row.amountRaw ?? ''),tradeSecret:row.tradeSecret,
+      parserConfidence:confidence,reviewStatus:row.reviewStatus,sourceType:row.sourceType
+    });
+  }
+  return {parserStatus,ingredients};
+}
+
+function parseIngredientsJson(raw) {
+  if (raw===null||raw===undefined||raw==='') return {parserStatus:null,ingredients:[]};
+  if (typeof raw!=='string'||new TextEncoder().encode(raw).byteLength>131072) return null;
+  try{return normalizeIngredients(JSON.parse(raw));}catch{return null;}
+}
+
+function ingredientInserts(env,a,productId,versionId,ingredients,now) {
+  return ingredients.map((row,index)=>env.DB.prepare(`INSERT INTO chemical_msds_ingredients
+    (id,company_id,product_id,version_id,chemical_name,synonym,cas_value,cas_status,amount_raw,trade_secret,parser_confidence,review_status,source_type,sort_order,reviewed_by_user_id,reviewed_at,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      crypto.randomUUID(),a.companyId,productId,versionId,row.chemicalName,row.synonym,row.casValue,row.casStatus,row.amountRaw,row.tradeSecret?1:0,
+      row.parserConfidence,row.reviewStatus,row.sourceType,index,row.reviewStatus==='AUTO_EXTRACTED'?null:a.userId,row.reviewStatus==='AUTO_EXTRACTED'?null:now,now,now));
+}
 function disposition(filename,download) {
   const fallback=filename.replace(/[^\x20-\x7e]/g,'_').replace(/["\\]/g,'_')||'msds.pdf';
   return `${download?'attachment':'inline'}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
@@ -49,11 +102,12 @@ async function access(request, env) {
   const grant = membership.role === 'company_admin' ? true : Boolean(await env.DB.prepare(`SELECT 1 FROM company_permission_grants g INNER JOIN company_departments d ON d.id=g.department_id AND d.company_id=g.company_id
     WHERE g.company_id=? AND g.user_id=? AND g.permission='msds_manage' AND g.status='active' AND d.status='active' LIMIT 1`).bind(companyId,userId).first());
   const department = membership.departmentId && await env.DB.prepare("SELECT id FROM company_departments WHERE id=? AND company_id=? AND status='active'").bind(membership.departmentId,companyId).first();
-  return { companyId,userId,departmentId: department?.id || null,manage:grant,report:Boolean(grant || department) };
+  return { companyId,userId,departmentId: department?.id || null,companyAdmin:membership.role === 'company_admin',manage:grant,report:true };
 }
 const fields = `p.id,p.company_id AS companyId,p.product_name AS productName,p.manufacturer,p.supplier,p.product_code AS productCode,p.general_use AS generalUse,p.product_status AS productStatus,
  p.created_at AS createdAt,p.updated_at AS updatedAt,creator.name AS createdByName,
- v.id AS currentVersionId,v.version_no AS versionNo,v.original_filename AS originalFilename,v.content_type AS contentType,v.size_bytes AS fileSize,v.checksum_sha256 AS checksumSha256,v.issue_date AS issueDate,v.revision_date AS revisionDate,v.submission_number AS submissionNumber,v.review_status AS reviewStatus,v.uploaded_at AS uploadedAt,uploader.name AS uploadedByName`;
+ v.id AS currentVersionId,v.version_no AS versionNo,v.original_filename AS originalFilename,v.content_type AS contentType,v.size_bytes AS fileSize,v.checksum_sha256 AS checksumSha256,v.issue_date AS issueDate,v.revision_date AS revisionDate,v.submission_number AS submissionNumber,v.review_status AS reviewStatus,v.uploaded_at AS uploadedAt,uploader.name AS uploadedByName,
+ CASE WHEN v.id IS NOT NULL AND EXISTS(SELECT 1 FROM chemical_msds_ingredients status_i WHERE status_i.version_id=v.id AND status_i.company_id=p.company_id AND status_i.review_status='AUTO_EXTRACTED') THEN 1 ELSE 0 END AS needsReview`;
 const joins = `FROM chemical_products p LEFT JOIN users creator ON creator.id=p.created_by LEFT JOIN chemical_msds_versions v ON v.product_id=p.id AND v.company_id=p.company_id AND v.is_current=1 LEFT JOIN users uploader ON uploader.id=v.uploaded_by`;
 async function product(env, a, id) { return env.DB.prepare(`SELECT ${fields} ${joins} WHERE p.company_id=? AND p.id=?`).bind(a.companyId,id).first(); }
 function productInput(value) {
@@ -65,7 +119,7 @@ function usageInput(value) {
     && quantity(value.averageUsageQuantity) && text(value.averageUsagePeriod,40) && text(value.usageUnit,40);
 }
 async function allowedDepartment(env,a,departmentId) {
-  if (!a.report || (!a.manage && departmentId !== a.departmentId)) return false;
+  if (!a.report) return false;
   return Boolean(await env.DB.prepare("SELECT 1 FROM company_departments WHERE id=? AND company_id=? AND status='active'").bind(departmentId,a.companyId).first());
 }
 const usageFields = `u.id,u.product_id AS productId,u.department_id AS departmentId,d.name AS departmentName,u.purpose,u.use_location AS useLocation,u.storage_location AS storageLocation,
@@ -78,18 +132,19 @@ export async function context({ request,env }) {
   const rejected=guard(request,['GET']); if(rejected)return rejected;
   try { const a=await access(request,env); if(a.response)return a.response;
     const departments=await env.DB.prepare("SELECT id,name FROM company_departments WHERE company_id=? AND status='active' ORDER BY name,id").bind(a.companyId).all();
-    return json({ok:true,access:{companyId:a.companyId,departmentId:a.departmentId,read:true,report:a.report,manage:a.manage},departments:departments.results});
+    return json({ok:true,access:{companyId:a.companyId,departmentId:a.departmentId,read:true,report:a.report,manage:a.manage,companyAdmin:a.companyAdmin},departments:departments.results});
   } catch(error){return failure(error);}
 }
 export async function dashboard({ request,env }) {
   const rejected=guard(request,['GET']); if(rejected)return rejected;
   try { const a=await access(request,env); if(a.response)return a.response;
     const summary=await env.DB.prepare(`SELECT COUNT(*) AS products,COUNT(v.id) AS withMsds,COUNT(*)-COUNT(v.id) AS withoutMsds,
-      COUNT(CASE WHEN v.review_status='UNREVIEWED' THEN 1 END) AS unreviewed
+      COUNT(CASE WHEN v.id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM chemical_msds_ingredients i WHERE i.version_id=v.id AND i.company_id=p.company_id AND i.review_status='AUTO_EXTRACTED') THEN 1 END) AS registered,
+      COUNT(CASE WHEN EXISTS(SELECT 1 FROM chemical_msds_ingredients i WHERE i.version_id=v.id AND i.company_id=p.company_id AND i.review_status='AUTO_EXTRACTED') THEN 1 END) AS needsReview
       FROM chemical_products p LEFT JOIN chemical_msds_versions v ON v.product_id=p.id AND v.company_id=p.company_id AND v.is_current=1 WHERE p.company_id=?`).bind(a.companyId).first();
     const departments=await env.DB.prepare(`SELECT d.id,d.name,COUNT(DISTINCT u.product_id) AS products,
       COUNT(DISTINCT CASE WHEN v.id IS NULL THEN u.product_id END) AS withoutMsds,
-      COUNT(DISTINCT CASE WHEN v.review_status='UNREVIEWED' THEN u.product_id END) AS unreviewed
+      COUNT(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM chemical_msds_ingredients i WHERE i.version_id=v.id AND i.company_id=u.company_id AND i.review_status='AUTO_EXTRACTED') THEN u.product_id END) AS needsReview
       FROM company_departments d LEFT JOIN chemical_usages u ON u.department_id=d.id AND u.company_id=d.company_id
       LEFT JOIN chemical_msds_versions v ON v.product_id=u.product_id AND v.company_id=u.company_id AND v.is_current=1
       WHERE d.company_id=? AND d.status='active' GROUP BY d.id,d.name ORDER BY products DESC,d.name`).bind(a.companyId).all();
@@ -114,12 +169,14 @@ export async function collection({ request,env }) {
   try { const a=await access(request,env); if(a.response)return a.response;
     if(request.method==='GET') {
       const params=new URL(request.url).searchParams,q=params.get('q')||'',status=params.get('status')||'all',departmentId=params.get('departmentId')||'',rawOffset=params.get('offset')||'0';
-      if(!text(q,200)||!['all','with-msds','without-msds','unreviewed','reviewed','ACTIVE','ARCHIVED'].includes(status)||departmentId&&!UUID.test(departmentId)||!/^\d+$/.test(rawOffset)||!Number.isSafeInteger(Number(rawOffset)))return errorResponse('INVALID_FILTER',400);
+      if(!text(q,200)||!['all','with-msds','without-msds','registered','needs-review','ACTIVE','ARCHIVED'].includes(status)||departmentId&&!UUID.test(departmentId)||!/^\d+$/.test(rawOffset)||!Number.isSafeInteger(Number(rawOffset)))return errorResponse('INVALID_FILTER',400);
       const pattern=`%${key(q).replace(/[\\%_]/g,'\\$&')}%`;
       const rows=await env.DB.prepare(`SELECT ${fields},(SELECT GROUP_CONCAT(name, ', ') FROM (SELECT DISTINCT d.name FROM chemical_usages u INNER JOIN company_departments d ON d.id=u.department_id AND d.company_id=u.company_id WHERE u.company_id=p.company_id AND u.product_id=p.id ORDER BY d.name)) AS departmentNames
         ${joins} WHERE p.company_id=? AND (p.product_name_key LIKE ? ESCAPE '\\' OR p.manufacturer_key LIKE ? ESCAPE '\\')
         AND (?='' OR EXISTS(SELECT 1 FROM chemical_usages u WHERE u.company_id=p.company_id AND u.product_id=p.id AND u.department_id=?))
-        AND (?='all' OR (?='with-msds' AND v.id IS NOT NULL) OR (?='without-msds' AND v.id IS NULL) OR (?='unreviewed' AND v.review_status='UNREVIEWED') OR (?='reviewed' AND v.review_status='REVIEWED') OR p.product_status=?)
+        AND (?='all' OR (?='with-msds' AND v.id IS NOT NULL) OR (?='without-msds' AND v.id IS NULL)
+          OR (?='registered' AND v.id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM chemical_msds_ingredients filter_i WHERE filter_i.version_id=v.id AND filter_i.company_id=p.company_id AND filter_i.review_status='AUTO_EXTRACTED'))
+          OR (?='needs-review' AND EXISTS(SELECT 1 FROM chemical_msds_ingredients filter_i WHERE filter_i.version_id=v.id AND filter_i.company_id=p.company_id AND filter_i.review_status='AUTO_EXTRACTED')) OR p.product_status=?)
         ORDER BY p.updated_at DESC,p.id DESC LIMIT 101 OFFSET ?`).bind(a.companyId,pattern,pattern,departmentId,departmentId,status,status,status,status,status,status,Number(rawOffset)).all();
       return json({ok:true,products:rows.results.slice(0,100),hasMore:rows.results.length>100});
     }
@@ -147,9 +204,12 @@ export async function item({ request,env,params }) {
     const p=await product(env,a,params.id);if(!p)return errorResponse('NOT_FOUND',404);
     if(request.method==='GET') {
       const usages=await env.DB.prepare(`SELECT ${usageFields} ${usageJoins} WHERE u.company_id=? AND u.product_id=? ORDER BY d.name,u.created_at,u.id`).bind(a.companyId,p.id).all();
-      const versions=await env.DB.prepare(`SELECT v.id,v.version_no AS versionNo,v.original_filename AS originalFilename,v.content_type AS contentType,v.size_bytes AS fileSize,v.checksum_sha256 AS checksumSha256,v.issue_date AS issueDate,v.revision_date AS revisionDate,v.submission_number AS submissionNumber,v.is_current AS isCurrent,v.review_status AS reviewStatus,v.uploaded_at AS uploadedAt,v.reviewed_at AS reviewedAt,u.name AS uploadedByName
+      const versions=await env.DB.prepare(`SELECT v.id,v.version_no AS versionNo,v.original_filename AS originalFilename,v.content_type AS contentType,v.size_bytes AS fileSize,v.checksum_sha256 AS checksumSha256,v.issue_date AS issueDate,v.revision_date AS revisionDate,v.submission_number AS submissionNumber,v.is_current AS isCurrent,v.review_status AS reviewStatus,v.uploaded_at AS uploadedAt,v.reviewed_at AS reviewedAt,u.name AS uploadedByName,
+        CASE WHEN EXISTS(SELECT 1 FROM chemical_msds_ingredients i WHERE i.version_id=v.id AND i.company_id=v.company_id AND i.review_status='AUTO_EXTRACTED') THEN 1 ELSE 0 END AS needsReview
         FROM chemical_msds_versions v LEFT JOIN users u ON u.id=v.uploaded_by WHERE v.company_id=? AND v.product_id=? ORDER BY v.version_no DESC`).bind(a.companyId,p.id).all();
-      return json({ok:true,product:p,usages:usages.results,versions:versions.results});
+      const currentIngredients=p.currentVersionId?await env.DB.prepare(`SELECT ${ingredientFields} FROM chemical_msds_ingredients i
+        WHERE i.company_id=? AND i.product_id=? AND i.version_id=? ORDER BY i.sort_order,i.id`).bind(a.companyId,p.id,p.currentVersionId).all():{results:[]};
+      return json({ok:true,product:p,usages:usages.results,versions:versions.results,currentIngredients:currentIngredients.results});
     }
     if(!a.manage)return errorResponse('CHEMICAL_MANAGE_REQUIRED',403);
     let body;try{body=await input(request);}catch(error){return inputError(error);}
@@ -167,20 +227,31 @@ export async function usages({ request,env,params }) {
     if(!usageInput(body))return errorResponse('INVALID_USAGE',400);
     if(!await allowedDepartment(env,a,body.departmentId))return errorResponse('DEPARTMENT_ACCESS_DENIED',403);
     const id=crypto.randomUUID(),now=date();
-    await env.DB.prepare(`INSERT INTO chemical_usages (id,company_id,product_id,department_id,purpose,use_location,storage_location,stock_quantity,stock_unit,average_usage_quantity,average_usage_period,usage_unit,reported_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(id,a.companyId,params.id,body.departmentId,...usageValues(body),a.userId,now,now).run();
+    const inserted=await env.DB.prepare(`INSERT INTO chemical_usages (id,company_id,product_id,department_id,purpose,use_location,storage_location,stock_quantity,stock_unit,average_usage_quantity,average_usage_period,usage_unit,reported_by,created_at,updated_at)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM chemical_usages WHERE company_id=? AND product_id=? AND department_id=?)`)
+      .bind(id,a.companyId,params.id,body.departmentId,...usageValues(body),a.userId,now,now,a.companyId,params.id,body.departmentId).run();
+    if(inserted.meta?.changes!==1)return errorResponse('USAGE_ALREADY_EXISTS',409);
     await env.DB.prepare('UPDATE chemical_products SET updated_at=? WHERE id=? AND company_id=?').bind(now,params.id,a.companyId).run();
     return json({ok:true,usageId:id},201);
   }catch(error){return failure(error);}
 }
 export async function usageItem({ request,env,params }) {
-  const rejected=guard(request,['GET','PATCH']);if(rejected)return rejected;
+  const rejected=guard(request,['GET','PATCH','DELETE']);if(rejected)return rejected;
   try {const a=await access(request,env);if(a.response)return a.response;
     if(!UUID.test(params.usageId||''))return errorResponse('NOT_FOUND',404);
     const row=await env.DB.prepare(`SELECT ${usageFields} ${usageJoins} WHERE u.company_id=? AND u.id=?`).bind(a.companyId,params.usageId).first();
     if(!row)return errorResponse('NOT_FOUND',404);
     if(request.method==='GET')return json({ok:true,usage:row});
-    if(!a.manage && row.departmentId!==a.departmentId)return errorResponse('DEPARTMENT_ACCESS_DENIED',403);
+    if(!a.manage)return errorResponse('CHEMICAL_MANAGE_REQUIRED',403);
+    if(request.method==='DELETE'){
+      if(!await allowedDepartment(env,a,row.departmentId))return errorResponse('DEPARTMENT_ACCESS_DENIED',403);
+      const now=date(),results=await env.DB.batch([
+        env.DB.prepare('DELETE FROM chemical_usages WHERE id=? AND company_id=? AND product_id=? AND department_id=?').bind(row.id,a.companyId,row.productId,row.departmentId),
+        env.DB.prepare('UPDATE chemical_products SET updated_at=? WHERE id=? AND company_id=?').bind(now,row.productId,a.companyId)
+      ]);
+      if(results[0].meta?.changes!==1||results[1].meta?.changes!==1)throw new Error('usage delete');
+      return json({ok:true});
+    }
     let body;try{body=await input(request);}catch(error){return inputError(error);}
     if(!usageInput(body)||body.departmentId!==row.departmentId)return errorResponse('INVALID_USAGE',400);
     if(!await allowedDepartment(env,a,row.departmentId))return errorResponse('DEPARTMENT_ACCESS_DENIED',403);
@@ -203,6 +274,8 @@ export async function versions({ request,env,params }) {
     if(contentLength>MAX_MSDS_BYTES+1024*1024)return errorResponse('MSDS_FILE_TOO_LARGE',413);
     let form;try{form=await request.formData();}catch{return errorResponse('INVALID_UPLOAD',400);}
     const file=form.get('file'),issueDate=String(form.get('issueDate')||''),revisionDate=String(form.get('revisionDate')||''),submissionNumber=String(form.get('submissionNumber')||'').trim();
+    const composition=parseIngredientsJson(form.get('composition'));
+    if(!composition)return errorResponse('INVALID_MSDS_INGREDIENTS',400);
     if(!file||typeof file.arrayBuffer!=='function'||typeof file.name!=='string')return errorResponse('MSDS_FILE_REQUIRED',400);
     const filename=safeFilename(file.name);
     if(!filename||!/\.pdf$/i.test(filename)||String(file.type).toLowerCase()!==PDF_TYPE)return errorResponse('INVALID_MSDS_FILE',400);
@@ -220,11 +293,38 @@ export async function versions({ request,env,params }) {
       const results=await env.DB.batch([
         env.DB.prepare('UPDATE chemical_msds_versions SET is_current=0 WHERE company_id=? AND product_id=? AND is_current=1').bind(a.companyId,params.id),
         env.DB.prepare(`INSERT INTO chemical_msds_versions (id,company_id,product_id,version_no,storage_key,original_filename,content_type,size_bytes,issue_date,revision_date,submission_number,is_current,uploaded_by,uploaded_at,review_status,checksum_sha256) VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?,'UNREVIEWED',?)`).bind(versionId,a.companyId,params.id,versionNo,storageKey,filename,PDF_TYPE,file.size,issueDate||null,revisionDate||null,submissionNumber,a.userId,now,checksum),
+        ...ingredientInserts(env,a,params.id,versionId,composition.ingredients,now),
         env.DB.prepare('UPDATE chemical_products SET updated_at=? WHERE id=? AND company_id=?').bind(now,params.id,a.companyId)
       ]);
-      if(results.some(result=>!result.success)||results[1].meta?.changes!==1||results[2].meta?.changes!==1)throw new Error('version insert');
-      return json({ok:true,version:{id:versionId,versionNo,isCurrent:true,originalFilename:filename,contentType:PDF_TYPE,fileSize:file.size,checksumSha256:checksum,issueDate:issueDate||null,revisionDate:revisionDate||null,submissionNumber,reviewStatus:'UNREVIEWED',uploadedAt:now}},201);
+      if(results.some(result=>!result.success)||results[1].meta?.changes!==1||results.at(-1).meta?.changes!==1)throw new Error('version insert');
+      return json({ok:true,version:{id:versionId,versionNo,isCurrent:true,originalFilename:filename,contentType:PDF_TYPE,fileSize:file.size,checksumSha256:checksum,issueDate:issueDate||null,revisionDate:revisionDate||null,submissionNumber,reviewStatus:'UNREVIEWED',uploadedAt:now},ingredientCount:composition.ingredients.length},201);
     }catch(error){if(typeof bucket.delete==='function')try{await bucket.delete(storageKey);}catch{}return failure(error);}
+  }catch(error){return failure(error);}
+}
+
+export async function ingredients({request,env,params}) {
+  const rejected=guard(request,['GET','PUT']);if(rejected)return rejected;
+  try{const a=await access(request,env);if(a.response)return a.response;
+    if(!UUID.test(params.id||'')||!UUID.test(params.versionId||''))return errorResponse('NOT_FOUND',404);
+    const version=await env.DB.prepare(`SELECT v.id FROM chemical_msds_versions v INNER JOIN chemical_products p ON p.id=v.product_id AND p.company_id=v.company_id
+      WHERE v.id=? AND v.product_id=? AND v.company_id=?`).bind(params.versionId,params.id,a.companyId).first();
+    if(!version)return errorResponse('NOT_FOUND',404);
+    if(request.method==='GET'){
+      const rows=await env.DB.prepare(`SELECT ${ingredientFields} FROM chemical_msds_ingredients i WHERE i.company_id=? AND i.product_id=? AND i.version_id=? ORDER BY i.sort_order,i.id`)
+        .bind(a.companyId,params.id,params.versionId).all();
+      return json({ok:true,productId:params.id,versionId:params.versionId,ingredients:rows.results});
+    }
+    if(!a.manage)return errorResponse('CHEMICAL_MANAGE_REQUIRED',403);
+    let body;try{body=await input(request,131072);}catch(error){return inputError(error);}
+    const composition=normalizeIngredients(body);if(!composition)return errorResponse('INVALID_MSDS_INGREDIENTS',400);
+    const now=date(),statements=[
+      env.DB.prepare('DELETE FROM chemical_msds_ingredients WHERE company_id=? AND product_id=? AND version_id=?').bind(a.companyId,params.id,params.versionId),
+      ...ingredientInserts(env,a,params.id,params.versionId,composition.ingredients,now),
+      env.DB.prepare('UPDATE chemical_products SET updated_at=? WHERE id=? AND company_id=?').bind(now,params.id,a.companyId)
+    ];
+    const results=await env.DB.batch(statements);
+    if(results.some(result=>!result.success)||results.at(-1).meta?.changes!==1)throw new Error('ingredient replace');
+    return json({ok:true,ingredientCount:composition.ingredients.length});
   }catch(error){return failure(error);}
 }
 

@@ -5,6 +5,7 @@ import { createSavedDocumentPreview } from './saved-document-preview.js';
 import { initRiskSurveyWorkspace } from './assets/risk/workspace.js';
 import { initChemicalManagement } from './assets/chemical/management.js';
 import { parseMsdsMetadata } from './assets/msds-metadata-parser.js';
+import { parseMsdsComposition, validateCasRegistryNumber } from './assets/msds-composition-parser.js';
 
 // PDF.js 본체와 워커는 반드시 같은 버전을 사용한다.
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.worker.mjs';
@@ -2929,11 +2930,14 @@ function showAppView(viewName) {
 async function analyzeChemicalMsdsFile(file) {
   const extracted = await extractPdfText(file, { silent: true, includePageObjects: false });
   const result = analyzeMsdsText(extracted);
-  return Object.fromEntries(['productName', 'manufacturer', 'supplier', 'productCode', 'issueDate', 'revisionDate', 'submissionNumber']
-    .map((name) => [name, result[name] || '']));
+  return {
+    ...Object.fromEntries(['productName', 'manufacturer', 'supplier', 'productCode', 'issueDate', 'revisionDate', 'submissionNumber']
+      .map((name) => [name, result[name] || ''])),
+    composition: parseMsdsComposition(extracted)
+  };
 }
 
-const chemicalManagement = initChemicalManagement({ analyzeMsdsFile: analyzeChemicalMsdsFile });
+const chemicalManagement = initChemicalManagement({ analyzeMsdsFile: analyzeChemicalMsdsFile, validateCasRegistryNumber });
 
 document.querySelectorAll('[data-view-link]').forEach((link) => {
   link.addEventListener('click', (event) => {
