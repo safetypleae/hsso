@@ -4,6 +4,7 @@ import { initMyPage } from './mypage.js';
 import { createSavedDocumentPreview } from './saved-document-preview.js';
 import { initRiskSurveyWorkspace } from './assets/risk/workspace.js';
 import { initChemicalManagement } from './assets/chemical/management.js';
+import { parseMsdsMetadata } from './assets/msds-metadata-parser.js';
 
 // PDF.js 본체와 워커는 반드시 같은 버전을 사용한다.
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.worker.mjs';
@@ -315,7 +316,7 @@ function buildPageText(items, pageNumber = 1) {
   return buildPageStructure(items, pageNumber).text;
 }
 
-async function extractPdfText(file) {
+async function extractPdfText(file, { silent = false, includePageObjects = true } = {}) {
   const data = new Uint8Array(await file.arrayBuffer());
   const loadingTask = pdfjsLib.getDocument({ data });
   const pdf = await loadingTask.promise;
@@ -323,27 +324,29 @@ async function extractPdfText(file) {
   const pages = [];
   const pageStructures = [];
   const pageObjects = [];
-  progressTitle.textContent = `총 ${pageCount}페이지를 확인했습니다.`;
+  if (!silent) progressTitle.textContent = `총 ${pageCount}페이지를 확인했습니다.`;
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-    progressDetail.textContent = `${pageNumber} / ${pageCount} 페이지의 텍스트를 추출하는 중입니다.`;
+    if (!silent) progressDetail.textContent = `${pageNumber} / ${pageCount} 페이지의 텍스트를 추출하는 중입니다.`;
     try {
       const page = await pdf.getPage(pageNumber);
       const textContent = await page.getTextContent({ includeMarkedContent: false });
       const pageStructure = buildPageStructure(textContent.items, pageNumber);
       pageStructures.push(pageStructure);
       pages.push(pageStructure.text);
-      const operatorList = await page.getOperatorList();
-      const imageOperators = new Set([
-        pdfjsLib.OPS.paintImageXObject,
-        pdfjsLib.OPS.paintInlineImageXObject,
-        pdfjsLib.OPS.paintImageMaskXObject,
-        pdfjsLib.OPS.paintSolidColorImageMask
-      ]);
-      pageObjects.push({
-        pageNumber,
-        imageCount: operatorList.fnArray.filter((operation) => imageOperators.has(operation)).length,
-        vectorCount: operatorList.fnArray.filter((operation) => operation === pdfjsLib.OPS.constructPath).length
-      });
+      if (includePageObjects) {
+        const operatorList = await page.getOperatorList();
+        const imageOperators = new Set([
+          pdfjsLib.OPS.paintImageXObject,
+          pdfjsLib.OPS.paintInlineImageXObject,
+          pdfjsLib.OPS.paintImageMaskXObject,
+          pdfjsLib.OPS.paintSolidColorImageMask
+        ]);
+        pageObjects.push({
+          pageNumber,
+          imageCount: operatorList.fnArray.filter((operation) => imageOperators.has(operation)).length,
+          vectorCount: operatorList.fnArray.filter((operation) => operation === pdfjsLib.OPS.constructPath).length
+        });
+      }
       page.cleanup();
     } catch (error) {
       error.pageNumber = pageNumber;
@@ -1277,7 +1280,8 @@ function analyzeMsdsText(source) {
   const productSearch = cleanSection(sectionOneLines).length ? cleanSection(sectionOneLines) : allTextLines;
   const hazardSearch = filteredSectionTwoLines.length ? filteredSectionTwoLines.map((line) => line.text) : (cleanSection(sectionTwoLines).length ? cleanSection(sectionTwoLines) : allTextLines);
   const itemPrefix = '(?:[가-하]\\.?\\s*)?';
-  const productName = extractFieldValue(productSearch, [new RegExp(`^${itemPrefix}(?:제품명|제품의\\s*명칭|화학제품명|상품명|물질명)\\s*(?:[|:：]\\s*)?`, 'i')], 2);
+  const metadata = parseMsdsMetadata(documentLines);
+  const productName = metadata.productName;
   const supplier = extractSupplierData(productSearch);
   const supplierInfo = [supplier.supplierName, supplier.contact ? `연락처: ${supplier.contact}` : ''].filter(Boolean).join('\n');
   const signalWord = extractFieldValue(hazardSearch, [new RegExp(`^${itemPrefix}신호어\\s*(?:[|:：]\\s*)?`, 'i')], 1);
@@ -1293,6 +1297,7 @@ function analyzeMsdsText(source) {
     : { ...legacyPrecautions, statements: [], anchors: [] };
   const pictogramText = hazardSearch.filter((line) => /그림문자|픽토그램|pictogram/i.test(line)).join('\n');
   return {
+    ...metadata,
     productName,
     supplierInfo,
     signalWord,
@@ -1314,6 +1319,7 @@ function analyzeMsdsText(source) {
       hCodes: hStatementRecords.map((statement) => statement.code).filter(Boolean),
       precautionCodes: Object.fromEntries(Object.entries(categorizedPrecautions.categories).map(([category, statements]) => [category, statements.map((statement) => statement.match(/^P\d{3}(?:\+P\d{3})*/i)?.[0]).filter(Boolean)])),
       supplier,
+      metadataFields: metadata.fields,
       codeNormalizations: documentLines.flatMap((line) => normalizeCodesInText(line.rawText || line.text).matches.map((match) => ({
         page: line.pageNumber, line: line.lineNumber, ...match
       })))
@@ -2920,7 +2926,14 @@ function showAppView(viewName) {
   if (nextView.id === 'chemicals') chemicalManagement.open();
 }
 
-const chemicalManagement = initChemicalManagement();
+async function analyzeChemicalMsdsFile(file) {
+  const extracted = await extractPdfText(file, { silent: true, includePageObjects: false });
+  const result = analyzeMsdsText(extracted);
+  return Object.fromEntries(['productName', 'manufacturer', 'supplier', 'productCode', 'issueDate', 'revisionDate', 'submissionNumber']
+    .map((name) => [name, result[name] || '']));
+}
+
+const chemicalManagement = initChemicalManagement({ analyzeMsdsFile: analyzeChemicalMsdsFile });
 
 document.querySelectorAll('[data-view-link]').forEach((link) => {
   link.addEventListener('click', (event) => {

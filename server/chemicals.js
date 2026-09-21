@@ -7,6 +7,8 @@ const key = value => clean(value).normalize('NFKC').toLocaleLowerCase('ko-KR');
 const text = (value, max, required = false) => typeof value === 'string' && value.trim().length <= max && (!required || Boolean(value.trim()));
 const quantity = value => value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1e9);
 const date = () => new Date().toISOString();
+export const MAX_MSDS_BYTES = 20 * 1024 * 1024;
+const PDF_TYPE = 'application/pdf';
 
 function guard(request, methods) {
   if (!methods.includes(request.method)) return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405, { Allow: methods.join(', ') });
@@ -23,7 +25,17 @@ async function input(request) {
   return JSON.parse(raw);
 }
 const inputError = error => errorResponse(error.message === 'PAYLOAD_TOO_LARGE' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_INPUT', error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400);
-const failure = error => errorResponse(String(error).includes('no such table') ? 'MIGRATION_REQUIRED' : 'INTERNAL_SERVER_ERROR', String(error).includes('no such table') ? 503 : 500);
+const failure = error => {
+  const migrationMissing = /no such (?:table|column)/i.test(String(error));
+  return errorResponse(migrationMissing ? 'MIGRATION_REQUIRED' : 'INTERNAL_SERVER_ERROR', migrationMissing ? 503 : 500);
+};
+const hex = bytes => Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2,'0')).join('');
+const isoDate = value => { if(value==='')return true;if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;const parsed=new Date(value+'T00:00:00Z');return !Number.isNaN(parsed.valueOf())&&parsed.toISOString().slice(0,10)===value; };
+const safeFilename = value => value.replace(/[\r\n\0]/g,'').slice(0,255);
+function disposition(filename,download) {
+  const fallback=filename.replace(/[^\x20-\x7e]/g,'_').replace(/["\\]/g,'_')||'msds.pdf';
+  return `${download?'attachment':'inline'}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
 
 async function access(request, env) {
   const companyId = new URL(request.url).searchParams.get('companyId');
@@ -41,7 +53,7 @@ async function access(request, env) {
 }
 const fields = `p.id,p.company_id AS companyId,p.product_name AS productName,p.manufacturer,p.supplier,p.product_code AS productCode,p.general_use AS generalUse,p.product_status AS productStatus,
  p.created_at AS createdAt,p.updated_at AS updatedAt,creator.name AS createdByName,
- v.id AS currentVersionId,v.version_no AS versionNo,v.original_filename AS originalFilename,v.issue_date AS issueDate,v.revision_date AS revisionDate,v.submission_number AS submissionNumber,v.review_status AS reviewStatus,v.uploaded_at AS uploadedAt,uploader.name AS uploadedByName`;
+ v.id AS currentVersionId,v.version_no AS versionNo,v.original_filename AS originalFilename,v.content_type AS contentType,v.size_bytes AS fileSize,v.checksum_sha256 AS checksumSha256,v.issue_date AS issueDate,v.revision_date AS revisionDate,v.submission_number AS submissionNumber,v.review_status AS reviewStatus,v.uploaded_at AS uploadedAt,uploader.name AS uploadedByName`;
 const joins = `FROM chemical_products p LEFT JOIN users creator ON creator.id=p.created_by LEFT JOIN chemical_msds_versions v ON v.product_id=p.id AND v.company_id=p.company_id AND v.is_current=1 LEFT JOIN users uploader ON uploader.id=v.uploaded_by`;
 async function product(env, a, id) { return env.DB.prepare(`SELECT ${fields} ${joins} WHERE p.company_id=? AND p.id=?`).bind(a.companyId,id).first(); }
 function productInput(value) {
@@ -135,7 +147,7 @@ export async function item({ request,env,params }) {
     const p=await product(env,a,params.id);if(!p)return errorResponse('NOT_FOUND',404);
     if(request.method==='GET') {
       const usages=await env.DB.prepare(`SELECT ${usageFields} ${usageJoins} WHERE u.company_id=? AND u.product_id=? ORDER BY d.name,u.created_at,u.id`).bind(a.companyId,p.id).all();
-      const versions=await env.DB.prepare(`SELECT v.id,v.version_no AS versionNo,v.original_filename AS originalFilename,v.issue_date AS issueDate,v.revision_date AS revisionDate,v.submission_number AS submissionNumber,v.is_current AS isCurrent,v.review_status AS reviewStatus,v.uploaded_at AS uploadedAt,v.reviewed_at AS reviewedAt,u.name AS uploadedByName
+      const versions=await env.DB.prepare(`SELECT v.id,v.version_no AS versionNo,v.original_filename AS originalFilename,v.content_type AS contentType,v.size_bytes AS fileSize,v.checksum_sha256 AS checksumSha256,v.issue_date AS issueDate,v.revision_date AS revisionDate,v.submission_number AS submissionNumber,v.is_current AS isCurrent,v.review_status AS reviewStatus,v.uploaded_at AS uploadedAt,v.reviewed_at AS reviewedAt,u.name AS uploadedByName
         FROM chemical_msds_versions v LEFT JOIN users u ON u.id=v.uploaded_by WHERE v.company_id=? AND v.product_id=? ORDER BY v.version_no DESC`).bind(a.companyId,p.id).all();
       return json({ok:true,product:p,usages:usages.results,versions:versions.results});
     }
@@ -184,7 +196,50 @@ export async function versions({ request,env,params }) {
   try {const a=await access(request,env);if(a.response)return a.response;
     if(!UUID.test(params.id||'')||!await product(env,a,params.id))return errorResponse('NOT_FOUND',404);
     if(!a.manage)return errorResponse('CHEMICAL_MANAGE_REQUIRED',403);
-    // No persistent object store is bound. Never create a metadata row for an unstored PDF.
-    return errorResponse('PERSISTENT_STORAGE_REQUIRED',503);
+    const bucket=env?.MSDS_BUCKET;if(!bucket||typeof bucket.put!=='function')return errorResponse('MSDS_STORAGE_UNAVAILABLE',503);
+    const contentType=request.headers.get('Content-Type')||'';
+    if(!contentType.toLowerCase().startsWith('multipart/form-data;'))return errorResponse('INVALID_CONTENT_TYPE',400);
+    const contentLength=Number(request.headers.get('Content-Length')||0);
+    if(contentLength>MAX_MSDS_BYTES+1024*1024)return errorResponse('MSDS_FILE_TOO_LARGE',413);
+    let form;try{form=await request.formData();}catch{return errorResponse('INVALID_UPLOAD',400);}
+    const file=form.get('file'),issueDate=String(form.get('issueDate')||''),revisionDate=String(form.get('revisionDate')||''),submissionNumber=String(form.get('submissionNumber')||'').trim();
+    if(!file||typeof file.arrayBuffer!=='function'||typeof file.name!=='string')return errorResponse('MSDS_FILE_REQUIRED',400);
+    const filename=safeFilename(file.name);
+    if(!filename||!/\.pdf$/i.test(filename)||String(file.type).toLowerCase()!==PDF_TYPE)return errorResponse('INVALID_MSDS_FILE',400);
+    if(!Number.isSafeInteger(file.size)||file.size<5)return errorResponse('INVALID_MSDS_FILE',400);
+    if(file.size>MAX_MSDS_BYTES)return errorResponse('MSDS_FILE_TOO_LARGE',413);
+    if(!isoDate(issueDate)||!isoDate(revisionDate)||!text(submissionNumber,100))return errorResponse('INVALID_MSDS_METADATA',400);
+    const bytes=await file.arrayBuffer(),signature=new TextDecoder('ascii').decode(bytes.slice(0,5));
+    if(signature!=='%PDF-')return errorResponse('INVALID_MSDS_FILE',400);
+    const checksum=hex(await crypto.subtle.digest('SHA-256',bytes));
+    const versionId=crypto.randomUUID(),storageKey=`companies/${a.companyId}/chemicals/${params.id}/msds/${versionId}.pdf`,now=date();
+    try{await bucket.put(storageKey,bytes,{httpMetadata:{contentType:PDF_TYPE}});}catch{return errorResponse('MSDS_STORAGE_WRITE_FAILED',502);}
+    try{
+      const latest=await env.DB.prepare('SELECT COALESCE(MAX(version_no),0) AS versionNo FROM chemical_msds_versions WHERE company_id=? AND product_id=?').bind(a.companyId,params.id).first();
+      const versionNo=Number(latest.versionNo)+1;
+      const results=await env.DB.batch([
+        env.DB.prepare('UPDATE chemical_msds_versions SET is_current=0 WHERE company_id=? AND product_id=? AND is_current=1').bind(a.companyId,params.id),
+        env.DB.prepare(`INSERT INTO chemical_msds_versions (id,company_id,product_id,version_no,storage_key,original_filename,content_type,size_bytes,issue_date,revision_date,submission_number,is_current,uploaded_by,uploaded_at,review_status,checksum_sha256) VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?,'UNREVIEWED',?)`).bind(versionId,a.companyId,params.id,versionNo,storageKey,filename,PDF_TYPE,file.size,issueDate||null,revisionDate||null,submissionNumber,a.userId,now,checksum),
+        env.DB.prepare('UPDATE chemical_products SET updated_at=? WHERE id=? AND company_id=?').bind(now,params.id,a.companyId)
+      ]);
+      if(results.some(result=>!result.success)||results[1].meta?.changes!==1||results[2].meta?.changes!==1)throw new Error('version insert');
+      return json({ok:true,version:{id:versionId,versionNo,isCurrent:true,originalFilename:filename,contentType:PDF_TYPE,fileSize:file.size,checksumSha256:checksum,issueDate:issueDate||null,revisionDate:revisionDate||null,submissionNumber,reviewStatus:'UNREVIEWED',uploadedAt:now}},201);
+    }catch(error){if(typeof bucket.delete==='function')try{await bucket.delete(storageKey);}catch{}return failure(error);}
+  }catch(error){return failure(error);}
+}
+
+export async function versionFile({request,env,params}) {
+  const rejected=guard(request,['GET']);if(rejected)return rejected;
+  try{const a=await access(request,env);if(a.response)return a.response;
+    if(!UUID.test(params.id||'')||!UUID.test(params.versionId||''))return errorResponse('NOT_FOUND',404);
+    const row=await env.DB.prepare(`SELECT v.storage_key AS storageKey,v.original_filename AS originalFilename,v.content_type AS contentType,v.size_bytes AS fileSize
+      FROM chemical_msds_versions v INNER JOIN chemical_products p ON p.id=v.product_id AND p.company_id=v.company_id
+      WHERE v.id=? AND v.product_id=? AND v.company_id=?`).bind(params.versionId,params.id,a.companyId).first();
+    if(!row)return errorResponse('NOT_FOUND',404);
+    const bucket=env?.MSDS_BUCKET;if(!bucket||typeof bucket.get!=='function')return errorResponse('MSDS_STORAGE_UNAVAILABLE',503);
+    let object;try{object=await bucket.get(row.storageKey);}catch{return errorResponse('MSDS_STORAGE_READ_FAILED',502);}
+    if(!object)return errorResponse('MSDS_FILE_NOT_FOUND',404);
+    const download=new URL(request.url).searchParams.get('download')==='1';
+    return new Response(object.body,{headers:{'Content-Type':PDF_TYPE,'Content-Length':String(row.fileSize),'Content-Disposition':disposition(row.originalFilename,download),'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
   }catch(error){return failure(error);}
 }

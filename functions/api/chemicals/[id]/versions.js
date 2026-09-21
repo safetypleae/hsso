@@ -1,1 +1,5 @@
-export { versions as onRequest } from '../../../../server/chemicals.js';
+import { versions } from '../../../../server/chemicals.js';
+
+export function onRequest(context) {
+  return versions(context);
+}
