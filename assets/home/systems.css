@@ -97,10 +97,52 @@ body:has(#home[hidden]) .hsso-systems { display: none; }
 
 @media (min-width:1001px) {
   .home-view .hsso-systems { padding: 28px 0 30px; overflow-y: auto; }
+  .home-view .hsso-systems > .section-shell { width: min(1520px,calc(100% - 64px)); }
   .home-view .hsso-systems-heading { margin-bottom: 24px; }
   .home-view .hsso-systems-heading > p:last-child { margin-top: 10px; line-height: 1.55; }
-  .home-view .hsso-system-card { min-height: 560px; padding: 24px; }
+  .home-view .hsso-system-card { min-height: 640px; padding: 30px; }
   .home-view .hsso-system-description { min-height: 58px; margin: 13px 0 15px; }
+  .home-view .hsso-system-visual { min-height: 290px; }
+}
+@media (min-width:1200px) {
+  .home-view .hsso-viz-caption { top: 16px; left: 18px; font-size: 9px; }
+  .home-view .chem-document { top: 84px; width: 76px; height: 108px; padding: 13px 10px; }
+  .home-view .chem-document strong { font-size: 12px; }
+  .home-view .chem-document i { height: 4px; margin-top: 7px; }
+  .home-view .chem-transfer { top: 140px; left: 26%; width: 18%; }
+  .home-view .chem-analyzer { top: 92px; left: 43%; width: 88px; height: 88px; font-size: 10px; }
+  .home-view .chem-results { top: 59px; right: 4%; width: 29%; gap: 7px; }
+  .home-view .chem-results span { min-height: 34px; padding: 7px 9px; font-size: 10px; }
+  .home-view .chem-results b { font-size: 11px; }
+  .home-view .risk-participants { top: 96px; grid-template-columns: repeat(2,36px); gap: 9px; }
+  .home-view .risk-participants > span { width: 35px; height: 35px; font-size: 11px; }
+  .home-view .risk-participants small,.home-view .risk-participants b { font-size: 9px; }
+  .home-view .risk-survey-panel { top: 48px; right: 4%; width: 69%; min-height: 227px; padding: 14px 15px; }
+  .home-view .risk-survey-panel header { padding-bottom: 10px; font-size: 10px; }
+  .home-view .risk-survey-panel header > b { font-size: 8px; }
+  .home-view .risk-survey-panel p { gap: 7px; margin-top: 9px; font-size: 9px; }
+  .home-view .risk-survey-panel p i { width: 10px; height: 10px; }
+  .home-view .risk-survey-panel .risk-choice i::after { width: 4px; height: 4px; margin: 2px; }
+  .home-view .risk-comment { height: 34px; margin-top: 11px; padding: 8px; font-size: 8px; }
+  .home-view .risk-comment b { inset: 8px; font-size: 8px; }
+  .home-view .risk-survey-panel button { min-width: 60px; min-height: 27px; margin-top: 10px; padding: 5px 11px; font-size: 9px; }
+  .home-view .risk-survey-panel > em { right: 83px; bottom: 17px; font-size: 9px; }
+  .home-view .health-board { inset: 46px 4% 14px; }
+  .home-view .health-board > header { height: 36px; padding-inline: 13px; font-size: 10px; }
+  .home-view .health-board > header span { font-size: 8px; }
+  .home-view .health-summary { gap: 12px; padding: 11px 13px 9px; }
+  .home-view .health-summary small { font-size: 8px; }
+  .home-view .health-summary span > b { font-size: 14px; }
+  .home-view .health-task-list { gap: 6px; padding-inline: 11px; }
+  .home-view .health-task-list > div { grid-template-columns: 27px minmax(0,1fr) auto; gap: 8px; min-height: 39px; padding: 5px 8px; }
+  .home-view .health-icon { width: 25px; height: 25px; font-size: 12px; }
+  .home-view .health-task-list span b { font-size: 10px; }
+  .home-view .health-task-list span small { font-size: 7px; }
+  .home-view .health-task-list em,.home-view .health-task-update em b,.home-view .health-task-update em strong { font-size: 8px; }
+  .home-view .health-task-update em { min-width: 40px; }
+  .home-view .health-next-task { top: 90px; right: 11px; left: 11px; }
+  .home-view .health-board > footer { height: 26px; padding-inline: 12px; font-size: 7px; }
+  .home-view .health-board > footer b { font-size: 8px; }
 }
 @media (max-width:1000px) {
   .hsso-systems { padding: 70px 0 78px; }.hsso-systems-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.hsso-system-card:last-child { grid-column: 1 / -1; min-height: 520px; }.hsso-system-card { min-height: 570px; }

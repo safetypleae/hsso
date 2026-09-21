@@ -288,7 +288,7 @@ body:has(#home:not([hidden])) .portal-account span { grid-column: 2; color: #9db
 .hsso-ambient-glow-c { top: 24%; left: 38%; width: 30vw; height: 30vw; background: rgba(64,179,180,.2); transform: translate(calc(var(--hsso-parallax-x) * .65),calc(var(--hsso-parallax-y) * .65)); animation: hsso-glow-c 24s ease-in-out infinite alternate; }
 .hsso-starfield { position: absolute; inset: 0; transform: translate(calc(var(--hsso-parallax-x) * -.25),calc(var(--hsso-parallax-y) * -.25)); transition: transform 1.2s cubic-bezier(.22,1,.36,1); }
 .hsso-starfield i { position: absolute; top: var(--y); left: var(--x); width: var(--s); height: var(--s); border-radius: 50%; background: #dceceb; box-shadow: 0 0 4px rgba(207,237,233,.38); opacity: var(--o); animation: hsso-background-twinkle 9s ease-in-out infinite var(--d); }
-.hsso-scorpius { position: absolute; top: 7%; left: 3.5%; width: min(35vw,470px); height: 72%; overflow: visible; filter: drop-shadow(0 0 6px rgba(184,230,222,.12)); transform: translate(calc(var(--hsso-parallax-x) * -.55),calc(var(--hsso-parallax-y) * -.55)); transition: transform 1s cubic-bezier(.22,1,.36,1); }
+.hsso-scorpius { position: absolute; top: 49%; left: 50%; width: min(84vw,1550px); height: auto; overflow: visible; opacity: .62; filter: drop-shadow(0 0 6px rgba(184,230,222,.12)); transform: translate(calc(-50% + var(--hsso-parallax-x) * -.55),calc(-50% + var(--hsso-parallax-y) * -.55)) rotate(-70deg); transition: transform 1s cubic-bezier(.22,1,.36,1); }
 .hsso-constellation-lines { fill: none; stroke: rgba(181,221,216,.28); stroke-width: 1.05; stroke-linecap: round; }
 .hsso-constellation-lines path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: hsso-constellation-line .48s ease-out forwards var(--d); }
 .hsso-constellation-stars circle { fill: #eef8f6; opacity: 0; transform-box: fill-box; transform-origin: center; animation: hsso-constellation-enter .5s cubic-bezier(.16,1,.3,1) forwards var(--d),hsso-constellation-twinkle var(--t) ease-in-out infinite calc(4s + var(--td)); }
@@ -524,9 +524,13 @@ body:has(#home:not([hidden])) .header-account { margin-left: auto; }
   .portal-page-controls { display: none; }
 }
 
+@media (min-width: 701px) and (max-width: 1000px) {
+  .hsso-scorpius { top: 37%; left: 45%; width: 96vw; opacity: .55; transform: translate(calc(-50% + var(--hsso-parallax-x) * -.55),calc(-50% + var(--hsso-parallax-y) * -.55)) rotate(-67deg); }
+}
+
 @media (max-width: 700px) {
   .hsso-ambient-glow { opacity: .14; filter: blur(65px); }
-  .hsso-scorpius { top: 4%; left: -8%; width: 63vw; height: 48%; opacity: .55; }
+  .hsso-scorpius { top: 25%; left: 26%; width: 92vw; height: auto; opacity: .55; transform: translate(calc(-50% + var(--hsso-parallax-x) * -.55),calc(-50% + var(--hsso-parallax-y) * -.55)) rotate(-65deg); }
   .hsso-starfield i:nth-child(3n) { display: none; }
   .hsso-shooting-star { display: none; }
 }
@@ -536,7 +540,7 @@ body:has(#home:not([hidden])) .header-account { margin-left: auto; }
   .hsso-ambient-scene,.hsso-ambient-glow,.hsso-starfield,.hsso-starfield i,.hsso-scorpius,.hsso-constellation-lines path,.hsso-constellation-stars circle { animation: none; transition: none; }
   .hsso-constellation-lines path { stroke-dashoffset: 0; }
   .hsso-constellation-stars circle { opacity: .9; transform: scale(1); }
-  .hsso-shooting-star { display: none; }
+  .hsso-ambient-scene .hsso-shooting-star { display: none; }
 }
 
 .portal-board-list { display: grid; margin: 0; padding: 0; list-style: none; }
