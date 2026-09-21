@@ -287,11 +287,8 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
     if(width<=700) {
       // Mobile home intentionally uses the portal drawer instead of the dropdown.
       await click('#portal-menu-button');await wait("!document.querySelector('#portal-menu').hidden");
-      assert.equal(await evaluate("getComputedStyle(document.querySelector('#portal-menu .msds-unavailable')).color"),'rgb(154, 166, 177)');
-      assert.equal(await evaluate("document.querySelector('#portal-menu .msds-unavailable').disabled"),true);
+      assert.equal(await evaluate("document.querySelector('#portal-menu [data-view-link=chemicals]').textContent"),'MSDS 관리');
       assert.notEqual(await evaluate("getComputedStyle(document.querySelector('#portal-menu [data-view-link=maker]')).color"),'rgb(154, 166, 177)');
-      await click('#portal-menu .msds-unavailable');
-      assert.equal(await evaluate("document.querySelector('#portal-menu').hidden"),false);
       await click('#portal-menu [data-view-link="maker"]');
       assert.equal(await evaluate('location.hash'),'#maker');
       await click('[data-view-link="risk-assessment"]');
@@ -302,18 +299,16 @@ test('local browser: protected dashboard, documents, adapters and responsive nav
       await wait("!document.querySelector('#msds-menu').hidden");
     }
     await openMsds();
-    const styles=await evaluate("[...document.querySelectorAll('#msds-menu a, #msds-menu button')].map(e=>({color:getComputedStyle(e).color,cursor:getComputedStyle(e).cursor,disabled:e.disabled===true,text:e.textContent}))");
+    const styles=await evaluate("[...document.querySelectorAll('#msds-menu a')].map(e=>({color:getComputedStyle(e).color,cursor:getComputedStyle(e).cursor,disabled:e.disabled===true,text:e.textContent}))");
     assert.equal(styles.length,3);assert.equal(styles[0].color,'rgb(17, 37, 61)');assert.equal(styles[1].color,'rgb(17, 37, 61)');
-    assert.equal(styles[2].color,'rgb(154, 166, 177)');assert.equal(styles[2].disabled,true);assert.equal(styles[2].cursor,'not-allowed');assert(styles[2].text.includes('준비 중'));
-    for(const [selector,color,background] of [['#msds-menu button','rgb(154, 166, 177)','rgba(0, 0, 0, 0)'],['#msds-menu a','rgb(15, 82, 107)','rgb(242, 247, 248)']]) {
+    assert.equal(styles[2].color,'rgb(17, 37, 61)');assert.equal(styles[2].disabled,false);assert(styles[2].text.includes('MSDS 관리'));
+    for(const [selector,color,background] of [['#msds-menu a','rgb(15, 82, 107)','rgb(242, 247, 248)']]) {
       const point=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
       await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',...point});
       assert.deepEqual(await evaluate(`(()=>{const s=getComputedStyle(document.querySelector(${JSON.stringify(selector)}));return[s.color,s.backgroundColor]})()`),[color,background],JSON.stringify({width,selector,point,hit:await evaluate(`document.elementFromPoint(${point.x},${point.y})?.outerHTML`),hover:await evaluate(`document.querySelector(${JSON.stringify(selector)}).matches(':hover')`)}));
     }
-    await evaluate("window.__disabledClicks=0;document.querySelector('#msds-menu button').addEventListener('click',()=>window.__disabledClicks++);document.querySelector('#msds-menu button').click()");
-    assert.equal(await evaluate('window.__disabledClicks'),0);
     assert.equal(await evaluate("document.querySelector('#msds-menu').hidden"),false);
-    assert.equal(await evaluate("document.querySelector('#portal-menu .msds-unavailable').disabled"),true);
+    assert.equal(await evaluate("!!document.querySelector('#portal-menu [data-view-link=chemicals]')"),true);
     assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
     for(const view of ['maker','process-guide']) {
       if(await evaluate("document.querySelector('#msds-menu').hidden"))await openMsds();

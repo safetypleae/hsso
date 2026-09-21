@@ -3,6 +3,7 @@ import { initAuthUI } from './auth.js';
 import { initMyPage } from './mypage.js';
 import { createSavedDocumentPreview } from './saved-document-preview.js';
 import { initRiskSurveyWorkspace } from './assets/risk/workspace.js';
+import { initChemicalManagement } from './assets/chemical/management.js';
 
 // PDF.js 본체와 워커는 반드시 같은 버전을 사용한다.
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/build/pdf.worker.mjs';
@@ -2865,6 +2866,7 @@ const appViews = {
   signup: document.querySelector('#signup'),
   maker: document.querySelector('#maker'),
   'process-guide': document.querySelector('#process-guide'),
+  chemicals: document.querySelector('#chemicals'),
   'risk-assessment': document.querySelector('#risk-assessment'),
   'risk-survey-create': document.querySelector('#risk-survey-create'),
   'risk-survey-preview': document.querySelector('#risk-survey-preview'),
@@ -2915,7 +2917,10 @@ function showAppView(viewName) {
   setMsdsMenuOpen(false);
   updateAuthView(nextView.id);
   updateMyPageView(nextView.id);
+  if (nextView.id === 'chemicals') chemicalManagement.open();
 }
+
+const chemicalManagement = initChemicalManagement();
 
 document.querySelectorAll('[data-view-link]').forEach((link) => {
   link.addEventListener('click', (event) => {
@@ -2952,6 +2957,7 @@ if (window.location.hash === '#maker') showAppView('maker');
 if (window.location.hash === '#mypage') showAppView('mypage');
 if (['#home-tools', '#home-about', '#systems'].includes(window.location.hash)) scrollToHomeSection(window.location.hash.slice(1));
 if (window.location.hash === '#process-guide') showAppView('process-guide');
+if (window.location.hash === '#chemicals') showAppView('chemicals');
 if (window.location.hash === '#risk-assessment') showAppView('risk-assessment');
 if (window.location.hash === '#risk-survey-create') showAppView('risk-survey-create');
 if (window.location.hash === '#boards') showAppView('boards');
