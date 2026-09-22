@@ -1,6 +1,7 @@
 import { json, errorResponse } from './auth-session.js';
 import { authenticate } from './documents.js';
 import { validateCasRegistryNumber } from '../assets/msds-composition-parser.js';
+import { evaluateRegulatory } from './regulatory-master-v1.js';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const clean = value => value.trim().replace(/\s+/gu, ' ');
@@ -197,8 +198,17 @@ export async function collection({ request,env }) {
     return json({ok:true,productId:id,usageId,msdsPresent:false},201);
   } catch(error){return failure(error);}
 }
+async function objectBytes(object){
+  if(typeof object.arrayBuffer==='function')return object.arrayBuffer();
+  if(object.body instanceof ArrayBuffer)return object.body;
+  if(ArrayBuffer.isView(object.body))return object.body.buffer.slice(object.body.byteOffset,object.body.byteOffset+object.body.byteLength);
+  if(typeof object.body?.arrayBuffer==='function')return object.body.arrayBuffer();
+  return new Response(object.body).arrayBuffer();
+}
+async function restoreObjects(bucket,backups){for(const row of backups)await bucket.put(row.storageKey,row.bytes,{httpMetadata:{contentType:row.contentType||PDF_TYPE}});}
+
 export async function item({ request,env,params }) {
-  const rejected=guard(request,['GET','PATCH']); if(rejected)return rejected;
+  const rejected=guard(request,['GET','PATCH','DELETE']); if(rejected)return rejected;
   try { const a=await access(request,env); if(a.response)return a.response;
     if(!UUID.test(params.id||''))return errorResponse('NOT_FOUND',404);
     const p=await product(env,a,params.id);if(!p)return errorResponse('NOT_FOUND',404);
@@ -209,9 +219,29 @@ export async function item({ request,env,params }) {
         FROM chemical_msds_versions v LEFT JOIN users u ON u.id=v.uploaded_by WHERE v.company_id=? AND v.product_id=? ORDER BY v.version_no DESC`).bind(a.companyId,p.id).all();
       const currentIngredients=p.currentVersionId?await env.DB.prepare(`SELECT ${ingredientFields} FROM chemical_msds_ingredients i
         WHERE i.company_id=? AND i.product_id=? AND i.version_id=? ORDER BY i.sort_order,i.id`).bind(a.companyId,p.id,p.currentVersionId).all():{results:[]};
-      return json({ok:true,product:p,usages:usages.results,versions:versions.results,currentIngredients:currentIngredients.results});
+      const regulatory=evaluateRegulatory(currentIngredients.results,{versionId:p.currentVersionId});
+      return json({ok:true,product:p,usages:usages.results,versions:versions.results,currentIngredients:currentIngredients.results,regulatory});
     }
     if(!a.manage)return errorResponse('CHEMICAL_MANAGE_REQUIRED',403);
+    if(request.method==='DELETE'){
+      const versionRows=await env.DB.prepare('SELECT storage_key AS storageKey,content_type AS contentType FROM chemical_msds_versions WHERE company_id=? AND product_id=? ORDER BY version_no').bind(a.companyId,p.id).all();
+      const bucket=env?.MSDS_BUCKET;
+      if(versionRows.results.length&&(!bucket||typeof bucket.get!=='function'||typeof bucket.delete!=='function'||typeof bucket.put!=='function'))return errorResponse('MSDS_STORAGE_UNAVAILABLE',503);
+      const backups=[];
+      try{
+        for(const row of versionRows.results){const object=await bucket.get(row.storageKey);if(!object)throw new Error('missing');backups.push({...row,bytes:await objectBytes(object)});}
+      }catch{return errorResponse('MSDS_STORAGE_READ_FAILED',502);}
+      const deleted=[];
+      try{for(const row of backups){await bucket.delete(row.storageKey);deleted.push(row);}}
+      catch{try{await restoreObjects(bucket,deleted);}catch{return errorResponse('PRODUCT_DELETE_ROLLBACK_FAILED',502);}return errorResponse('MSDS_STORAGE_DELETE_FAILED',502);}
+      try{
+        const latestRows=await env.DB.prepare('SELECT storage_key AS storageKey FROM chemical_msds_versions WHERE company_id=? AND product_id=? ORDER BY version_no').bind(a.companyId,p.id).all();
+        if(latestRows.results.length!==backups.length||latestRows.results.some((row,index)=>row.storageKey!==backups[index].storageKey)){await restoreObjects(bucket,backups);return errorResponse('PRODUCT_CHANGED_DURING_DELETE',409);}
+        const removal=await env.DB.prepare('DELETE FROM chemical_products WHERE id=? AND company_id=?').bind(p.id,a.companyId).run();
+        if(removal?.success===false)throw new Error('product delete');
+      }catch{try{await restoreObjects(bucket,backups);}catch{return errorResponse('PRODUCT_DELETE_ROLLBACK_FAILED',500);}return errorResponse('PRODUCT_DELETE_DB_FAILED',500);}
+      return json({ok:true,deletedProductId:p.id,deletedVersions:backups.length});
+    }
     let body;try{body=await input(request);}catch(error){return inputError(error);}
     if(!productInput(body)||!['ACTIVE','ARCHIVED'].includes(body.productStatus))return errorResponse('INVALID_PRODUCT',400);
     await env.DB.prepare(`UPDATE chemical_products SET product_name=?,product_name_key=?,manufacturer=?,manufacturer_key=?,supplier=?,product_code=?,general_use=?,product_status=?,updated_at=? WHERE id=? AND company_id=?`)

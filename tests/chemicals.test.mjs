@@ -115,10 +115,10 @@ test('current MSDS metadata is company-scoped and registered status follows actu
 });
 
 class FakeBucket {
-  constructor(){this.objects=new Map();this.deleted=[];this.putCalls=0;this.failPut=false;}
+  constructor(){this.objects=new Map();this.deleted=[];this.putCalls=0;this.failPut=false;this.failDeleteAt=0;this.deleteCalls=0;}
   async put(key,value){this.putCalls+=1;if(this.failPut)throw new Error('put failed');this.objects.set(key,new Uint8Array(value));return {key};}
   async get(key){const body=this.objects.get(key);return body?{body}:null;}
-  async delete(key){this.deleted.push(key);this.objects.delete(key);}
+  async delete(key){this.deleteCalls+=1;if(this.failDeleteAt===this.deleteCalls)throw new Error('delete failed');this.deleted.push(key);this.objects.delete(key);}
 }
 const pdf=(suffix='')=>new TextEncoder().encode('%PDF-1.7\n'+suffix);
 async function upload(f,user,companyId,productId,{bucket,file=pdf(),filename='원문.pdf',type='application/pdf',issueDate='2026-08-10',revisionDate='2026-08-14',submissionNumber='AA123',composition}={}){
@@ -278,4 +278,78 @@ test('ingredient insert failure rolls back version rows and cleans the new R2 ob
   const failed=await upload(f,'admin',f.companyA,id,{bucket,composition:composition()});assert.equal(failed.status,500);
   assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_msds_versions').get().count,0);assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_msds_ingredients').get().count,0);
   assert.equal(bucket.objects.size,0);assert.equal(bucket.deleted.length,1);
+});
+
+async function deleteProduct(f,user,companyId,productId,bucket,db=f.db){
+  const request=new Request(`${origin}/api/chemicals/${productId}?companyId=${companyId}`,{method:'DELETE',headers:{Origin:origin,'Content-Type':'application/json',Cookie:f.users[user].cookie},body:'{}'});
+  const response=await item({request,env:{DB:db,...(bucket?{MSDS_BUCKET:bucket}:{})},params:{id:productId}});
+  return {status:response.status,data:await response.json()};
+}
+
+test('company_admin deletes the complete product graph and every R2 version',async t=>{
+  const f=await fixture(t),id=(await create(f)).data.productId,bucket=new FakeBucket();
+  await upload(f,'admin',f.companyA,id,{bucket,composition:composition()});
+  await upload(f,'admin',f.companyA,id,{bucket,composition:composition([autoIngredient({chemicalName:'Water',synonym:'',casValue:'7732-18-5',amountRaw:'80%'})])});
+  const otherId=(await create(f,'reporter',f.companyA,f.departmentA2,{product:{...product,productName:'other product'},createNew:true})).data.productId;
+  const result=await deleteProduct(f,'admin',f.companyA,id,bucket);
+  assert.equal(result.status,200);assert.equal(result.data.deletedVersions,2);assert.equal(bucket.objects.size,0);
+  assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_products WHERE id=?').get(id).count,0);
+  for(const table of ['chemical_usages','chemical_msds_versions','chemical_msds_ingredients'])assert.equal(f.db.sqlite.prepare(`SELECT COUNT(*) count FROM ${table} WHERE product_id=?`).get(id).count,0);
+  assert.equal((await call(f,item,'admin',f.companyA,{params:{id}})).status,404);
+  assert.equal((await call(f,item,'admin',f.companyA,{params:{id:otherId}})).status,200);
+});
+
+test('successful DB deletion without meta.changes still returns success instead of a false failure',async t=>{
+  const f=await fixture(t),id=(await create(f)).data.productId,bucket=new FakeBucket();
+  await upload(f,'admin',f.companyA,id,{bucket,composition:composition()});
+  const dbWithoutChanges={...f.db,prepare(sql){
+    const prepared=f.db.prepare(sql);if(!sql.startsWith('DELETE FROM chemical_products'))return prepared;
+    return {bind(...args){const bound=prepared.bind(...args);return {async run(){await bound.run();return {success:true};}};}};
+  }};
+  const result=await deleteProduct(f,'admin',f.companyA,id,bucket,dbWithoutChanges);
+  assert.equal(result.status,200);assert.equal(result.data.ok,true);
+  assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_products WHERE id=?').get(id).count,0);
+  assert.equal(bucket.objects.size,0);
+});
+
+test('msds_manage can delete while member and other company are rejected',async t=>{
+  const f=await fixture(t),id=(await create(f)).data.productId,bucket=new FakeBucket();
+  assert.equal((await deleteProduct(f,'reporter',f.companyA,id,bucket)).status,403);
+  assert.equal((await deleteProduct(f,'other',f.companyB,id,bucket)).status,404);
+  assert.equal((await deleteProduct(f,'manager',f.companyA,id,bucket)).status,200);
+});
+
+test('R2 delete failure restores removed objects and preserves the whole DB graph',async t=>{
+  const f=await fixture(t),id=(await create(f)).data.productId,bucket=new FakeBucket();
+  await upload(f,'admin',f.companyA,id,{bucket,composition:composition()});
+  await upload(f,'admin',f.companyA,id,{bucket,composition:composition()});
+  bucket.failDeleteAt=2;
+  const result=await deleteProduct(f,'admin',f.companyA,id,bucket);
+  assert.equal(result.status,502);assert.equal(result.data.error,'MSDS_STORAGE_DELETE_FAILED');
+  assert.equal(bucket.objects.size,2);assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_products WHERE id=?').get(id).count,1);
+  assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_msds_versions WHERE product_id=?').get(id).count,2);
+  assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_msds_ingredients WHERE product_id=?').get(id).count,2);
+});
+
+test('DB delete failure restores all R2 objects and reports failure',async t=>{
+  const f=await fixture(t),id=(await create(f)).data.productId,bucket=new FakeBucket();
+  await upload(f,'admin',f.companyA,id,{bucket,composition:composition()});
+  const failingDb={...f.db,prepare(sql){if(sql.startsWith('DELETE FROM chemical_products'))return {bind(){return {async run(){throw new Error('db delete failed');}}}};return f.db.prepare(sql);}};
+  const result=await deleteProduct(f,'admin',f.companyA,id,bucket,failingDb);
+  assert.equal(result.status,500);assert.equal(result.data.error,'PRODUCT_DELETE_DB_FAILED');
+  assert.equal(bucket.objects.size,1);assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_products WHERE id=?').get(id).count,1);
+});
+
+test('regulatory result is member-readable, company-scoped and follows only the current version',async t=>{
+  const f=await fixture(t),id=(await create(f)).data.productId,bucket=new FakeBucket();
+  const first=await upload(f,'admin',f.companyA,id,{bucket,composition:composition()});
+  let detail=(await call(f,item,'reader',f.companyA,{params:{id}})).data;
+  assert.equal(detail.regulatory.versionId,first.data.version.id);
+  assert.equal(detail.regulatory.categories.MANAGED.state,'MATCH');
+  const second=await upload(f,'admin',f.companyA,id,{bucket,composition:composition([autoIngredient({chemicalName:'Sodium chloride',synonym:'염화나트륨',casValue:'7647-14-5',amountRaw:'99'})])});
+  detail=(await call(f,item,'reader',f.companyA,{params:{id}})).data;
+  assert.equal(detail.regulatory.versionId,second.data.version.id);
+  assert.equal(detail.regulatory.categories.MANAGED.state,'NO_MATCH');
+  assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_msds_ingredients WHERE product_id=?').get(id).count,2,'past version ingredients remain');
+  assert.equal((await call(f,item,'other',f.companyB,{params:{id}})).status,404);
 });
