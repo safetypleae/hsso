@@ -1,4 +1,4 @@
-import { json, errorResponse, guardRequest, readSessionToken, hashToken, publicUser } from '../../../server/auth-session.js';
+﻿import { json, errorResponse, guardRequest, readSessionToken, hashToken, publicUser } from '../../../server/auth-session.js';
 import { userRole } from '../../../server/admin-auth.js';
 
 export async function onRequest({ request, env }) {
@@ -18,3 +18,4 @@ export async function onRequest({ request, env }) {
     return errorResponse('INTERNAL_SERVER_ERROR', 500);
   }
 }
+

@@ -11,11 +11,22 @@ import { once } from 'node:events';
 import { fixture, createSurvey, surveyPayload, responsePayload, call, publicResponses } from './helpers/risk-fixture.mjs';
 import { surveyCollection, surveyItem, adminResponses, adminResponseItem, responseCsv } from '../server/risk-surveys.js';
 import { surveyStatistics, responseXlsx } from '../server/risk-statistics.js';
+import { reviewScope, reviewCollection, reviewItem } from '../server/risk-reviews.js';
+import { assessmentItemCollection, assessmentItem } from '../server/risk-assessment-items.js';
+import { companies } from '../server/company-workspaces.js';
 import { collection as documents } from '../server/documents.js';
 import { onRequest as me } from '../functions/api/auth/me.js';
 
 test('browser: survey management, charts, filters, XLSX, stale requests, error recovery and mobile', { skip: !process.env.HSSO_BROWSER, timeout: 60000 }, async t => {
   const { db, a, b } = await fixture(t);
+  db.sqlite.exec(await readFile(new URL('../migrations/0010_company_workspaces.sql', import.meta.url), 'utf8'));
+  db.sqlite.exec(await readFile(new URL('../migrations/0017_risk_response_reviews.sql', import.meta.url), 'utf8'));
+  db.sqlite.exec(await readFile(new URL('../migrations/0018_risk_assessment_items.sql', import.meta.url), 'utf8'));
+  db.sqlite.exec(await readFile(new URL('../migrations/0019_risk_improvements.sql', import.meta.url), 'utf8'));
+  const companyId = crypto.randomUUID(), departmentId = crypto.randomUUID(), companyNow = new Date().toISOString();
+  db.sqlite.prepare('INSERT INTO companies VALUES (?,?,?,?,?,?,?)').run(companyId, '브라우저 검증 회사', '브라우저 검증 회사', 'active', a.id, companyNow, companyNow);
+  db.sqlite.prepare('INSERT INTO company_departments VALUES (?,?,?,?,?,?,?,?)').run(departmentId, companyId, 'BM오션', 'BM오션', 'active', a.id, companyNow, companyNow);
+  db.sqlite.prepare('INSERT INTO company_memberships VALUES (?,?,?,?,?,?,?,?,?)').run(crypto.randomUUID(), companyId, a.id, 'company_admin', 'active', departmentId, '', companyNow, companyNow);
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const questions = [...html.matchAll(/<li id="survey-question-(\d)">([\s\S]*?)(?=<li id="survey-question-|<\/ol>)/g)].map(([, id, text]) => ({ id: 'q' + id, type: 'test', text: /<h3>(.*?)<\/h3>/.exec(text)[1], options: [...text.matchAll(/<li>(.*?)<\/li>/g)].map(m => m[1]) }));
   questions.push({ id: 'safe_reason', type: 'single_choice', text: '안전 사유', options: ['절차 준수', '기타'] });
@@ -32,11 +43,14 @@ test('browser: survey management, charts, filters, XLSX, stale requests, error r
     try {
       const url = new URL(req.url, base), parts = url.pathname.split('/');
       if (url.pathname.startsWith('/api/')) {
-        const handlers = { '/api/auth/me': me, '/api/documents': documents, '/api/risk-surveys': surveyCollection };
-        const handler = handlers[url.pathname] || (parts[2] === 'risk-surveys' ? ({ statistics: surveyStatistics, 'responses.xlsx': responseXlsx, 'responses.csv': responseCsv, responses: parts[5] ? adminResponseItem : adminResponses }[parts[4]] || surveyItem) : null);
+        const handlers = { '/api/auth/me': me, '/api/documents': documents, '/api/risk-surveys': surveyCollection, '/api/companies': companies };
+        const reviewHandler = parts[4] === 'reviews' ? (parts[5] === 'scope' ? reviewScope : parts[5] ? reviewItem : reviewCollection) : null;
+        const assessmentHandler = parts[2] === 'companies' && parts[4] === 'risk-assessment-items' ? (parts[5] ? assessmentItem : assessmentItemCollection) : null;
+        const handler = handlers[url.pathname] || reviewHandler || assessmentHandler || (parts[2] === 'risk-surveys' ? ({ statistics: surveyStatistics, 'responses.xlsx': responseXlsx, 'responses.csv': responseCsv, responses: parts[5] ? adminResponseItem : adminResponses }[parts[4]] || surveyItem) : null);
         if (!handler) { res.writeHead(404).end(); return; }
-        const request = new Request(url, { headers: req.headers });
-        let response = handler === surveyStatistics && failStats ? Response.json({ ok: false }, { status: 500 }) : await handler({ request, env: { DB: db }, params: { id: parts[3], responseId: parts[5] } });
+        const chunks = []; for await (const chunk of req) chunks.push(chunk); const requestBody = Buffer.concat(chunks);
+        const request = new Request(url, { method: req.method, headers: req.headers, ...(requestBody.length ? { body: requestBody } : {}) });
+        let response = handler === surveyStatistics && failStats ? Response.json({ ok: false }, { status: 500 }) : await handler({ request, env: { DB: db }, params: { id: parts[3], responseId: parts[5], companyId:parts[3], itemId:parts[5] } });
         if (handler === surveyStatistics && delayStats && url.searchParams.has('department')) await new Promise(r => setTimeout(r, 300));
         if (handler === responseXlsx) excelQueries.push(url.searchParams.get('department') || '');
         res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(Buffer.from(await response.arrayBuffer())); return;
@@ -114,6 +128,31 @@ test('browser: survey management, charts, filters, XLSX, stale requests, error r
   await clickText('← 설문 관리로 돌아가기');
   await wait(`[...document.querySelectorAll('#my-content a')].some(a=>a.textContent==='응답 다운로드')`);
   await clickText('상세'); await wait(`document.querySelector('#my-content h1')?.textContent==='응답 상세'`);
+  await clickText('← 설문 상세로 돌아가기'); await wait(`[...document.querySelectorAll('#my-content button')].some(b=>b.textContent==='통계 보기')`);
+  await clickText('관리자 검토'); await wait(`document.querySelector('.risk-review-scope')`);
+  await evaluate(`document.querySelector('.risk-review-scope').requestSubmit()`); await wait(`document.querySelector('.risk-review-card')`);
+  await clickText('보류'); await wait(`!document.querySelector('.risk-review-editor').hidden`);
+  assert.equal(await evaluate(`document.querySelector('.risk-review-editor textarea').value`), '');
+  await clickText('보류 저장'); await wait(`document.querySelector('.risk-review-card .risk-review-badge').textContent==='보류'`);
+  assert.equal(await evaluate(`document.querySelectorAll('.risk-review-summary strong')[3].textContent`), '1');
+  await clickText('제외'); await wait(`!document.querySelector('.risk-review-editor').hidden`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.risk-review-editor textarea').parentElement).display`), 'none');
+  await evaluate(`(()=>{const select=document.querySelector('.risk-review-editor select');select.value='OTHER';select.dispatchEvent(new Event('change'));document.querySelector('.risk-review-editor textarea').value='브라우저 기타 사유';})()`);
+  assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.risk-review-editor textarea').parentElement).display`), 'none');
+  await clickText('제외 저장'); await wait(`document.querySelector('.risk-review-card .risk-review-badge').textContent==='제외'`);
+  assert.equal(await evaluate(`document.querySelectorAll('.risk-review-summary strong')[4].textContent`), '1');
+  await clickText('채택'); await wait(`document.querySelector('.risk-review-card .risk-review-badge').textContent==='채택'`);
+  assert.equal(await evaluate(`document.querySelectorAll('.risk-review-summary strong')[2].textContent+','+document.querySelectorAll('.risk-review-summary strong')[3].textContent+','+document.querySelectorAll('.risk-review-summary strong')[4].textContent`), '1,0,0');
+  await clickText('평가항목 만들기'); await wait(`document.querySelector('.risk-assessment-form')`);
+  await evaluate(`(()=>{const form=document.querySelector('.risk-assessment-form'),set=(name,value)=>{const node=form.elements[name];node.value=value;node.dispatchEvent(new Event('change'));};set('departmentId',${JSON.stringify(departmentId)});set('workProcess','보일러실 점검');set('hazardFactor','작업환경 / 미끄러짐');set('hazardSituation','바닥 물기로 넘어질 위험');set('currentMeasures','정기 청소');set('likelihood','3');set('severity','2');set('reductionMeasures','누수 점검 및 미끄럼방지 조치');})()`);
+  assert.equal(await evaluate(`document.querySelector('.risk-assessment-score output').textContent`),'6');
+  await evaluate(`document.querySelector('.risk-assessment-form').requestSubmit()`); await wait(`document.querySelector('.risk-assessment-item')`);
+  assert.match(await evaluate(`document.querySelector('.risk-assessment-item').textContent`),/근로자 설문.*위험성 6/s);
+  await clickText('수정'); await wait(`document.querySelector('.risk-assessment-form')`);
+  await evaluate(`(()=>{const form=document.querySelector('.risk-assessment-form');form.elements.likelihood.value='2';form.elements.likelihood.dispatchEvent(new Event('change'));form.elements.severity.value='4';form.elements.severity.dispatchEvent(new Event('change'));})()`);
+  assert.equal(await evaluate(`document.querySelector('.risk-assessment-score output').textContent`),'8'); await clickText('수정 저장'); await wait(`document.querySelector('.risk-assessment-item .risk-assessment-risk')?.textContent==='위험성 8'`);
+  await evaluate(`window.confirm=()=>true`); await clickText('삭제'); await wait(`document.querySelector('.my-empty')?.textContent.includes('작성된 평가항목이 없습니다')`);
+  await clickText('← 관리자 검토함으로 돌아가기'); await wait(`[...document.querySelectorAll('#my-content button')].some(b=>b.textContent==='평가항목 만들기')`);
   await clickText('← 설문 상세로 돌아가기'); await wait(`[...document.querySelectorAll('#my-content button')].some(b=>b.textContent==='통계 보기')`);
   await clickText('통계 보기'); await ready(3);
   delayStats = true; await choose('BM오션'); await clickText('← 설문 관리로 돌아가기');

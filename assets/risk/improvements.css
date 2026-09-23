@@ -1,0 +1,27 @@
+.risk-improvement-message { min-height:24px; color:#4056a1; }
+.risk-improvement-list { display:grid; gap:16px; margin-top:22px; }
+.risk-improvement-card,.risk-improvement-summary,.risk-improvement-photos,.risk-improvement-review,.risk-improvement-history,.risk-improvement-revision { margin-top:20px; padding:22px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+.risk-improvement-card>div { display:flex; gap:10px; align-items:center; }
+.risk-improvement-card h2 { margin:14px 0 6px; }
+.risk-overdue { color:#b13731; }
+.risk-improvement-filters { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin-top:20px; }
+.risk-improvement-filters label { display:grid; gap:7px; flex:1 1 180px; font-weight:700; }
+.risk-improvement-filters select { width:100%; padding:11px; border:1px solid var(--line); border-radius:8px; background:#fff; font:inherit; }
+.risk-improvement-filters .risk-filter-check { display:flex; flex:0 1 auto; align-items:center; min-height:44px; }
+.risk-improvement-summary dl { display:grid; grid-template-columns:170px minmax(0,1fr); }
+.risk-improvement-summary dt,.risk-improvement-summary dd { padding:10px 0; margin:0; border-bottom:1px solid #edf1f3; white-space:pre-wrap; }
+.risk-improvement-summary dt { color:var(--muted); }
+.risk-improvement-after { padding:14px; background:var(--blue-soft); color:var(--blue-dark); font-weight:750; }
+.risk-improvement-form,.risk-approval-form { display:grid; gap:14px; margin-top:20px; }
+.risk-improvement-form label,.risk-approval-form label { display:grid; gap:7px; font-weight:700; }
+.risk-improvement-form textarea,.risk-improvement-form select,.risk-improvement-form input,.risk-approval-form select { width:100%; padding:11px; border:1px solid var(--line); border-radius:8px; background:#fff; font:inherit; }
+.risk-improvement-photo-group { margin-top:18px; }
+.risk-improvement-photo-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
+.risk-improvement-photo-grid figure { margin:0; padding:8px; border:1px solid var(--line); border-radius:8px; }
+.risk-improvement-photo-grid img { width:100%; height:130px; object-fit:cover; border-radius:5px; }
+.risk-improvement-photo-grid figcaption { margin:7px 0; overflow-wrap:anywhere; font-size:12px; }
+.risk-photo-upload { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+.risk-improvement-revision { border-left:5px solid #d79218; }
+.risk-approval-form { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.risk-approval-score { grid-column:1/-1; padding:14px; background:var(--blue-soft); font-weight:750; }
+@media(max-width:700px){.risk-improvement-summary dl,.risk-approval-form{grid-template-columns:minmax(0,1fr)}.risk-approval-score{grid-column:1}.risk-photo-upload input{max-width:100%}}

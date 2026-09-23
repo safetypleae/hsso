@@ -2,6 +2,8 @@ import { mountRiskStatistics } from './assets/risk/statistics.js';
 import { createSurveyQrButton } from './assets/risk/qr.js';
 import { mountSurveyEditor } from './assets/risk/builder.js';
 import { appendResponseExtras, confirmSurveyDeletion } from './assets/risk/response-details.js';
+import { mountRiskReviews } from './assets/risk/reviews.js';
+import { mountRiskImprovements } from './assets/risk/improvements.js';
 
 const TYPES = { warning_label: '경고표지', process_guide: '작업공정별 관리요령' };
 const $ = selector => document.querySelector(selector);
@@ -10,7 +12,7 @@ const date = value => new Date(value).toLocaleDateString('ko-KR', { timeZone: 'A
 
 export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
   const root = $('#mypage'); const content = $('#my-content'); const status = $('#my-status');
-  let generation = 0; let current = 'dashboard'; let user; let role; let offset = 0;
+  let generation = 0; let current = 'dashboard'; let user; let role; let offset = 0; let riskReviewAvailable = false;
   let filters = { type: '', period: '90', q: '' };
   const latestInviteLinks = new Map();
   let pendingDelete; let opener;
@@ -69,7 +71,7 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
     const list=el('div','','my-document-list');
     for(const survey of surveys) { const row=el('article','','my-document-row my-risk-row'), name=el('div','','my-document-name'); name.append(el('span',RISK_STATUS[survey.status]||survey.status,'my-secondary'),el('h3',survey.title),el('p',survey.target,'my-secondary'));
       const meta=el('div','','my-document-meta'); meta.append(el('span',`${survey.startDate} ~ ${survey.endDate}`),el('span',`응답 ${survey.responseCount}건`),el('span',`생성일 ${date(survey.createdAt)}`));
-      const actions=el('div','','my-actions'); actions.append(copyButton(survey.publicToken),createSurveyQrButton(survey),button('관리',()=>riskDetail(survey.id)),button('통계 보기',()=>riskStatistics(survey.id))); row.append(name,meta,actions); list.append(row); }
+      const actions=el('div','','my-actions'); actions.append(copyButton(survey.publicToken),createSurveyQrButton(survey),button('관리',()=>riskDetail(survey.id)),button('통계 보기',()=>riskStatistics(survey.id))); if(riskReviewAvailable)actions.append(button('관리자 검토',()=>riskReviews(survey.id))); row.append(name,meta,actions); list.append(row); }
     return list;
   }
   async function riskWorkspace(data) {
@@ -81,6 +83,10 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
     const version = ++generation; clearContent(); status.textContent = '';
     disposePreview = mountRiskStatistics(content, { id, back: () => riskDetail(id), isCurrent: () => version === generation && !root.hidden, loginRequired });
   }
+  function riskReviews(id) {
+    const version = ++generation; clearContent(); status.textContent = '';
+    disposePreview = mountRiskReviews(content, { id, back: () => riskDetail(id), isCurrent: () => version === generation && !root.hidden, loginRequired });
+  }
   async function riskDetail(id) {
     const version=++generation; clearContent(); status.textContent='설문을 불러오는 중입니다.';
     try { const [{survey},responseData]=await Promise.all([api('/api/risk-surveys/'+encodeURIComponent(id)),api('/api/risk-surveys/'+encodeURIComponent(id)+'/responses?limit=20&offset=0')]); if(version!==generation||root.hidden)return; status.textContent='';
@@ -89,6 +95,7 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
       const actions=el('div','','my-actions'); actions.append(copyButton(survey.publicToken)); const toggle=button(survey.isActive?'비활성으로 전환':'활성으로 전환',async()=>{toggle.disabled=true;try{await api('/api/risk-surveys/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({isActive:!survey.isActive})});await riskDetail(id);}catch{toggle.disabled=false;status.textContent='상태를 변경하지 못했습니다.';}}); actions.append(toggle);
       const download=document.createElement('a'); download.className='secondary-button'; download.textContent='응답 다운로드'; download.href=`/api/risk-surveys/${encodeURIComponent(id)}/responses.csv`; actions.append(download); content.append(actions,el('h2','응답 목록'));
       actions.append(button('통계 보기',()=>riskStatistics(id)));
+      if(riskReviewAvailable)actions.append(button('관리자 검토',()=>riskReviews(id)));
       actions.append(createSurveyQrButton(survey));
       actions.append(button('설문 수정',()=>{const version=++generation;clearContent();status.textContent='';disposePreview=mountSurveyEditor(content,{survey,back:()=>riskDetail(id),saved:()=>riskDetail(id),loginRequired,isCurrent:()=>version===generation&&!root.hidden});}));
       actions.append(button('설문 삭제',()=>confirmSurveyDeletion(survey,{deleted:()=>{current='risk';load();},loginRequired})));
@@ -345,7 +352,8 @@ export function initMyPage(navigate, readWarning, readProcess, mountPreview) {
         renderProfile(); return;
       }
       if (current === 'company') { await renderCompanyWorkspace(); return; }
-      if (current === 'risk') { const data=await api('/api/risk-surveys'); if(version!==generation||root.hidden)return; status.textContent=''; await riskWorkspace(data); return; }
+      if (current === 'risk') { const [data,companies]=await Promise.all([api('/api/risk-surveys'),api('/api/companies').catch(()=>({companies:[]}))]); if(version!==generation||root.hidden)return; riskReviewAvailable=companies.companies.some(company=>company.role==='company_admin'&&company.membershipStatus==='active'&&company.status==='active'); status.textContent=''; await riskWorkspace(data); return; }
+      if (current === 'improvements') { status.textContent=''; disposePreview=mountRiskImprovements(content,{back:()=>{current='dashboard';load();},isCurrent:()=>version===generation&&!root.hidden,loginRequired}); return; }
       const params = new URLSearchParams(current === 'dashboard' ? {period:'90',limit:'5'} : {...filters,limit:'20',offset:String(offset)});
       const data = await api('/api/documents?' + params);
       if (version !== generation || root.hidden) return;

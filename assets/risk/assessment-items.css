@@ -1,0 +1,25 @@
+.risk-assessment-message { min-height: 24px; color: #4056a1; }
+.risk-assessment-source { margin: 22px 0; padding: 20px; border-left: 4px solid #4056a1; background: #f5f7fb; }
+.risk-assessment-source h2 { margin-top: 0; }
+.risk-assessment-source div { display: grid; grid-template-columns: 120px minmax(0,1fr); gap: 12px; padding: 8px 0; }
+.risk-assessment-source p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.risk-assessment-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; margin-top: 24px; }
+.risk-assessment-form > label { display: grid; gap: 8px; font-weight: 700; }
+.risk-assessment-form > label:nth-of-type(n+4), .risk-assessment-form > .risk-assessment-dimensions, .risk-assessment-form > .my-actions { grid-column: 1 / -1; }
+.risk-assessment-form input, .risk-assessment-form textarea, .risk-assessment-form select, .risk-assessment-filters select { width: 100%; min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
+.risk-assessment-dimensions { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; align-items: end; }
+.risk-assessment-dimensions label { display: grid; gap: 8px; font-weight: 700; }
+.risk-assessment-score { display: grid; gap: 8px; padding: 12px 16px; border-radius: 8px; background: var(--blue-soft); }
+.risk-assessment-score output { color: var(--blue-dark); font-size: 22px; font-weight: 750; }
+.risk-assessment-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 20px 0; }
+.risk-assessment-filters label { display: grid; gap: 7px; flex: 1 1 180px; font-weight: 700; }
+.risk-assessment-list { display: grid; gap: 16px; margin-top: 20px; }
+.risk-assessment-item { padding: 22px; border: 1px solid var(--line); border-left: 5px solid #4056a1; border-radius: 10px; background: #fff; }
+.risk-assessment-item-top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.risk-assessment-risk { margin-left: auto; color: #4056a1; font-weight: 750; }
+.risk-assessment-item h2 { margin: 16px 0; font-size: 18px; }
+.risk-assessment-item dl { display: grid; grid-template-columns: 160px minmax(0,1fr); margin: 0 0 18px; }
+.risk-assessment-item dt, .risk-assessment-item dd { padding: 9px 0; margin: 0; border-bottom: 1px solid #edf1f3; white-space: pre-wrap; overflow-wrap: anywhere; }
+.risk-assessment-item dt { color: var(--muted); }
+.risk-assessment-improvement-status { padding: 12px 14px; border-radius: 8px; background: var(--blue-soft); color: var(--blue-dark); font-weight: 700; }
+@media (max-width:700px) { .risk-assessment-form, .risk-assessment-dimensions { grid-template-columns: minmax(0,1fr); } .risk-assessment-form > label { grid-column: 1 / -1; } .risk-assessment-source div, .risk-assessment-item dl { grid-template-columns: minmax(0,1fr); gap: 2px; } .risk-assessment-risk { width:100%; margin-left:0; } }

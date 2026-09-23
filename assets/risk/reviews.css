@@ -1,0 +1,27 @@
+.risk-reviews { max-width: 1040px; margin: 0 auto; }
+.risk-reviews h1 { margin: 24px 0 8px; }
+.risk-review-message { min-height: 24px; color: #4056a1; }
+.risk-review-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 24px 0; }
+.risk-review-summary section { padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.risk-review-summary span, .risk-review-summary strong { display: block; }
+.risk-review-summary span { color: var(--muted); font-size: 13px; }
+.risk-review-summary strong { margin-top: 5px; color: var(--navy); font-size: 24px; }
+.risk-review-filters, .risk-review-scope { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.risk-review-filters label, .risk-review-scope label, .risk-review-editor label { display: grid; gap: 7px; min-width: 0; font-weight: 700; }
+.risk-review-filters label { flex: 1 1 180px; }
+.risk-review-filters select, .risk-review-filters input, .risk-review-scope select, .risk-review-editor select, .risk-review-editor textarea { width: 100%; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
+.risk-review-list { display: grid; gap: 14px; }
+.risk-review-card { padding: 20px; border: 1px solid var(--line); border-left: 5px solid #aab2bd; border-radius: 10px; background: #fff; }
+.risk-review-card.is-accepted { border-left-color: #278557; } .risk-review-card.is-hold { border-left-color: #d79218; } .risk-review-card.is-rejected { border-left-color: #b64a4a; }
+.risk-review-card-top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.risk-review-card-top time { margin-left: auto; }
+.risk-review-badge { padding: 4px 9px; border-radius: 999px; background: #eef1f5; font-size: 12px; font-weight: 750; }
+.risk-review-work { color: #4056a1; font-weight: 700; }
+.risk-review-opinion { margin-top: 14px; } .risk-review-opinion h3 { margin: 0 0 5px; font-size: 14px; } .risk-review-opinion p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.risk-review-audit { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
+.risk-review-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.risk-review-conversion { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); color: #278557; }
+.risk-review-editor { display: grid; gap: 12px; margin-top: 14px; padding: 14px; border-radius: 8px; background: #f6f8fb; }
+.risk-review-editor[hidden] { display: none; }
+.risk-review-editor [hidden] { display: none; }
+@media (max-width: 700px) { .risk-review-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .risk-review-card-top time { width: 100%; margin-left: 0; } }
