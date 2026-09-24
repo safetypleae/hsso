@@ -1,5 +1,6 @@
 import { LIKELIHOOD, SEVERITY } from './schema.js';
 import { mountRiskImprovements } from './improvements.js';
+import { mountRiskPhase4 } from './phase4.js';
 
 const el = (tag, text = '', className = '') => Object.assign(document.createElement(tag), { textContent: text, className });
 const button = (text, action, className = 'secondary-button') => { const node = el('button', text, className); node.type = 'button'; node.addEventListener('click', action); return node; };
@@ -69,7 +70,7 @@ export function mountRiskAssessmentWorkspace(root, { companyId, source = null, i
   async function showList() {
     heading('위험성평가표','작성된 평가항목을 확인하고 수정할 수 있습니다.'); status.textContent='평가항목을 불러오는 중입니다.';
     const query=new URLSearchParams({limit:'50',offset:String(offset)});if(filters.department)query.set('department',filters.department);if(filters.source)query.set('source',filters.source);
-    try{const data=await request(base+'?'+query);if(!active())return;heading('위험성평가표','작성된 평가항목을 확인하고 수정할 수 있습니다.');status.textContent='';const actions=el('div','','my-actions');actions.append(button('직접 평가항목 추가',()=>showEditor(null,null),'primary-button'),button('개선조치 관리',()=>mountRiskImprovements(root,{companyId,admin:true,back:showList,isCurrent:active,loginRequired})));root.append(actions);
+    try{const data=await request(base+'?'+query);if(!active())return;heading('위험성평가표','작성된 평가항목을 확인하고 수정할 수 있습니다.');status.textContent='';const actions=el('div','','my-actions');actions.append(button('직접 평가항목 추가',()=>showEditor(null,null),'primary-button'),button('개선조치 관리',()=>mountRiskImprovements(root,{companyId,admin:true,back:showList,isCurrent:active,loginRequired})),button('연간 평가·Excel',()=>mountRiskPhase4(root,{companyId,back:showList,isCurrent:active,loginRequired})));root.append(actions);
       const form=el('form','','risk-assessment-filters'), department=el('select'), sourceSelect=el('select');department.append(new Option('전체 부서',''));data.departmentNames.forEach(name=>department.append(new Option(name,name)));department.value=filters.department;sourceSelect.append(new Option('전체 출처',''),new Option('근로자 설문','SURVEY'),new Option('관리자 직접등록','DIRECT'));sourceSelect.value=filters.source;
       for(const [labelText,select] of [['부서',department],['출처',sourceSelect]]){const label=el('label',labelText);label.append(select);form.append(label);}const apply=el('button','적용','primary-button');apply.type='submit';form.append(apply);form.addEventListener('submit',event=>{event.preventDefault();filters={department:department.value,source:sourceSelect.value};offset=0;showList();});root.append(form);
       const list=el('div','','risk-assessment-list');data.items.forEach(item=>list.append(itemCard(item)));root.append(data.items.length?list:el('p','작성된 평가항목이 없습니다.','my-empty'));const pages=el('div','','my-actions');if(offset)pages.append(button('이전',()=>{offset=Math.max(0,offset-data.limit);showList();}));if(data.hasMore)pages.append(button('다음',()=>{offset+=data.limit;showList();}));if(pages.children.length)root.append(pages);
