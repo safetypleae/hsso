@@ -73,6 +73,13 @@ body:has(#home[hidden]) .hsso-systems { display: none; }
 .hsso-system-features small { flex: 0 0 auto; color: #87969b; font-size: 9px; }
 .hsso-system-features a { color: #087969; font-weight: 700; }.hsso-system-features a:hover { color: #075d52; }.hsso-system-features a:focus-visible { outline: 2px solid #168876; outline-offset: 3px; border-radius: 2px; }
 
+.hsso-introduction { display: grid; grid-template-columns: minmax(190px,.65fr) minmax(0,1.35fr); align-items: center; gap: 28px; margin-top: 24px; padding: 22px 26px; border: 1px solid #d9e3e6; border-left: 3px solid #168876; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(22,51,66,.05); }
+.hsso-introduction-brand { display: grid; gap: 4px; }
+.hsso-introduction-brand strong { color: #183448; font-size: 22px; letter-spacing: -.035em; }
+.hsso-introduction-brand span { color: #168876; font-size: 10px; font-weight: 750; letter-spacing: .11em; }
+.hsso-introduction-copy h3 { margin: 0; color: #183448; font-size: 18px; letter-spacing: -.025em; }
+.hsso-introduction-copy p { max-width: 760px; margin: 8px 0 0; color: #647880; font-size: 13px; line-height: 1.7; }
+
 @keyframes chem-document-cycle { 0%,8%,92%,100% { border-color: #bfcfd4; transform: translateX(0); } 14%,23% { border-color: #5eab9d; transform: translateX(3px); box-shadow: 0 0 0 4px rgba(32,161,126,.07),0 7px 18px rgba(28,65,77,.1); } }
 @keyframes chem-data-transfer { 0%,12% { opacity: 0; transform: translateX(0); } 16% { opacity: 1; } 27% { opacity: 0; transform: translateX(45px); } 100% { opacity: 0; } }
 @keyframes chem-analyzer-cycle { 0%,20%,43%,100% { border-color: #69ad9f; } 26%,38% { border-color: #168876; box-shadow: 0 0 0 10px rgba(32,161,126,.1),0 8px 22px rgba(18,95,84,.16); } }
@@ -151,6 +158,7 @@ body:has(#home[hidden]) .hsso-systems { display: none; }
 @media (max-width:700px) {
   .hsso-systems { padding: 54px 0 62px; }.hsso-systems-heading { margin-bottom: 30px; text-align: left; }.hsso-systems-heading > p:last-child br { display: none; }.hsso-systems-grid { grid-template-columns: minmax(0,1fr); gap: 16px; }.hsso-system-card,.hsso-system-card:last-child { grid-column: auto; min-height: 0; padding: 22px; }.hsso-system-card > header { padding-right: 0; }.hsso-system-state { position: static; display: inline-block; margin-top: 11px; }.hsso-system-description { min-height: 0; }.hsso-system-visual { min-height: 215px; }
   .hsso-system-card:last-child .health-board { right: 5%; left: 5%; }.chem-results { width: 25%; }.risk-survey-panel { width: 65%; }
+  .hsso-introduction { grid-template-columns: minmax(0,1fr); gap: 13px; margin-top: 18px; padding: 19px 20px; }
 }
 @media (prefers-reduced-motion:reduce) {
   .hsso-system-card,.chem-document,.chem-transfer i,.chem-analyzer,.chem-analyzer::after,.chem-analyzer i,.chem-results span,.risk-participants b,.risk-count-before,.risk-count-after,.risk-choice i::after,.risk-comment b,.risk-survey-panel button,.risk-survey-panel > em,.health-board > header i,.health-summary > i b,.health-task-update,.health-task-list > div:nth-child(3),.health-next-task,.health-task-update em b,.health-task-update em strong { transition: none; animation: none; }
