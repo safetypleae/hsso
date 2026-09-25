@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createTestDB } from './helpers/d1-memory.mjs';
 import { hashToken } from '../server/auth-session.js';
-import { context,dashboard,candidates,collection,item,usages,usageItem,versions,ingredients,versionFile,MAX_MSDS_BYTES } from '../server/chemicals.js';
+import { context,dashboard,candidates,collection,item,usages,usageItem,versions,ingredients,versionFile,exportWorkbook,MAX_MSDS_BYTES } from '../server/chemicals.js';
+import { chemicalWorkbook,departmentSheetNames } from '../server/chemical-xlsx.js';
+import { readZip } from '../server/risk-template-xlsx.js';
 import { onRequest as versionsRoute } from '../functions/api/chemicals/[id]/versions.js';
 import { onRequest as ingredientsRoute } from '../functions/api/chemicals/[id]/versions/[versionId]/ingredients.js';
+import { onRequest as exportRoute } from '../functions/api/chemicals/export.xlsx.js';
 
 const origin='https://local.example';
 const product={productName:'WD-40',manufacturer:'WD-40 Company',supplier:'공급사',productCode:'WD40',generalUse:'윤활'};
@@ -352,4 +355,59 @@ test('regulatory result is member-readable, company-scoped and follows only the 
   assert.equal(detail.regulatory.categories.MANAGED.state,'NO_MATCH');
   assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) count FROM chemical_msds_ingredients WHERE product_id=?').get(id).count,2,'past version ingredients remain');
   assert.equal((await call(f,item,'other',f.companyB,{params:{id}})).status,404);
+});
+
+const entryText=(entries,name)=>new TextDecoder().decode(entries.get(name).compressed);
+async function exportXlsx(f,user='reader',companyId=f.companyA,query=''){
+  const request=new Request(`${origin}/api/chemicals/export.xlsx?companyId=${companyId}${query?'&'+query:''}`,{headers:{...(user?{Cookie:f.users[user].cookie}:{})}});
+  return exportWorkbook({request,env:{DB:f.db}});
+}
+
+test('MSDS workbook creates department index and one row per usage with current metadata and existing regulatory decisions',async t=>{
+  const f=await fixture(t),bucket=new FakeBucket(),shared=(await create(f)).data.productId;
+  await call(f,usages,'admin',f.companyA,{method:'POST',params:{id:shared},body:{...usage(f.departmentA2),purpose:'객실 설비 윤활',useLocation:'객실 기계실'}});
+  await upload(f,'admin',f.companyA,shared,{bucket,revisionDate:'2026-09-20',submissionNumber:'SUB-2026',composition:composition([autoIngredient(),autoIngredient({chemicalName:'Xylene',synonym:'자일렌',casValue:'1330-20-7',amountRaw:'5~10%'})])});
+  const missing=(await create(f,'admin',f.companyA,f.departmentA2,{product:{...product,productName:'=2+2',manufacturer:'검색제조사'},createNew:true})).data.productId;
+  const pending=(await create(f,'admin',f.companyA,f.departmentA,{product:{...product,productName:'검토 제품'},createNew:true})).data.productId;
+  await upload(f,'admin',f.companyA,pending,{bucket,composition:composition([autoIngredient({chemicalName:'Silica',synonym:'실리카',casValue:'68611-44-9',amountRaw:'5 - 9.9'}),autoIngredient({reviewStatus:'AUTO_EXTRACTED'})])});
+  const noMatch=(await create(f,'admin',f.companyA,f.departmentA,{product:{...product,productName:'비해당 제품'},createNew:true})).data.productId;
+  await upload(f,'admin',f.companyA,noMatch,{bucket,composition:composition([autoIngredient({chemicalName:'Sodium chloride',synonym:'염화나트륨',casValue:'7647-14-5',amountRaw:'99%'})])});
+  await create(f,'other',f.companyB,f.departmentB,{product:{...product,productName:'타사 비밀제품'},createNew:true});
+
+  const response=await exportXlsx(f);assert.equal(response.status,200);assert.match(response.headers.get('content-type'),/spreadsheetml/);assert.match(response.headers.get('content-disposition'),/\.xlsx/);
+  const entries=readZip(await response.arrayBuffer()),workbook=entryText(entries,'xl/workbook.xml'),allXml=[...entries].filter(([name])=>name.startsWith('xl/worksheets/')).map(([name])=>entryText(entries,name)).join('\n');
+  assert.match(workbook,/sheet name="부서 목록"/);assert.match(workbook,/sheet name="시설팀"/);assert.match(workbook,/sheet name="객실정비팀"/);
+  const list=entryText(entries,'xl/worksheets/sheet1.xml');assert.match(list,/HSSO MSDS 부서 목록/);assert.match(list,/location="&apos;시설팀&apos;!A1"/);assert.match(list,/location="&apos;객실정비팀&apos;!A1"/);
+  assert.equal((allXml.match(/>WD-40<\/t>/g)||[]).length,2,'one shared product appears once in each of its two usage departments');
+  assert.match(allXml,/2026-09-20/);assert.match(allXml,/SUB-2026/);assert.match(allXml,/해당\n\(Toluene, Xylene\)/);assert.match(allXml,/대상 유해인자 포함\n\(Toluene, Xylene\)/);assert.match(allXml,/확인 필요\n\(Silica\)/);
+  assert.match(allXml,/비해당/);assert.doesNotMatch(allXml,/\(Sodium chloride\)/);
+  assert.match(allXml,/=2\+2/);assert.doesNotMatch(allXml,/<f(?:\s|>)/);assert.doesNotMatch(allXml,/타사 비밀제품/);
+  assert(entries.has('[Content_Types].xml')&&entries.has('xl/styles.xml')&&entries.has('xl/worksheets/sheet3.xml'),'generated workbook reparses with all sheets');
+  const firstDepartment=entryText(entries,'xl/worksheets/sheet2.xml');assert.equal((firstDepartment.match(/<c r="[A-S]4"/g)||[]).length,19,'regulatory detail stays inside the existing 19 columns');assert.match(firstDepartment,/ht="42"/);assert.match(entryText(entries,'xl/styles.xml'),/wrapText="1"/);
+  const routed=await exportRoute({request:new Request(`${origin}/api/chemicals/export.xlsx?companyId=${f.companyA}`,{headers:{Cookie:f.users.reader.cookie}}),env:{DB:f.db}});assert.equal(routed.status,200);assert(readZip(await routed.arrayBuffer()).has('xl/workbook.xml'));
+
+  const departmentOnly=readZip(await (await exportXlsx(f,'reader',f.companyA,new URLSearchParams({departmentId:f.departmentA}).toString())).arrayBuffer());
+  const departmentWorkbook=entryText(departmentOnly,'xl/workbook.xml'),departmentXml=[...departmentOnly].filter(([name])=>name.startsWith('xl/worksheets/')).map(([name])=>entryText(departmentOnly,name)).join('\n');
+  assert.match(departmentWorkbook,/시설팀/);assert.doesNotMatch(departmentWorkbook,/객실정비팀/);assert.doesNotMatch(departmentXml,/=2\+2/);
+  const searched=entryText(readZip(await (await exportXlsx(f,'reader',f.companyA,'q='+encodeURIComponent('검색제조사'))).arrayBuffer()),'xl/workbook.xml');assert.match(searched,/객실정비팀/);assert.doesNotMatch(searched,/시설팀/);
+  const without=readZip(await (await exportXlsx(f,'reader',f.companyA,'status=without-msds')).arrayBuffer()),withoutXml=[...without].filter(([name])=>name.startsWith('xl/worksheets/')).map(([name])=>entryText(without,name)).join('\n');assert.match(withoutXml,/=2\+2/);assert.doesNotMatch(withoutXml,/>WD-40<\/t>/);
+  const needs=readZip(await (await exportXlsx(f,'reader',f.companyA,'status=needs-review')).arrayBuffer()),needsXml=[...needs].filter(([name])=>name.startsWith('xl/worksheets/')).map(([name])=>entryText(needs,name)).join('\n');assert.match(needsXml,/검토 제품/);assert.doesNotMatch(needsXml,/>WD-40<\/t>/);
+  assert.equal((await exportXlsx(f,null)).status,401);assert.equal((await exportXlsx(f,'other',f.companyA)).status,404);
+  assert(missing);
+});
+
+test('MSDS workbook export is not limited to the 100-row list page',async t=>{
+  const f=await fixture(t);
+  for(let index=0;index<105;index++)await create(f,'admin',f.companyA,f.departmentA,{product:{...product,productName:`대량 제품 ${String(index).padStart(3,'0')}`},createNew:true});
+  const list=await collection({request:new Request(`${origin}/api/chemicals?companyId=${f.companyA}`,{headers:{Cookie:f.users.admin.cookie}}),env:{DB:f.db}}),listData=await list.json();assert.equal(listData.products.length,100);assert.equal(listData.hasMore,true);
+  const entries=readZip(await (await exportXlsx(f,'admin')).arrayBuffer()),department=entryText(entries,'xl/worksheets/sheet2.xml');
+  assert.equal((department.match(/<row r="(?:[5-9]|[1-9]\d+)"/g)||[]).length,105);assert.match(department,/대량 제품 104/);
+});
+
+test('department sheet names are safe, unique and formula-looking text remains an inline string',()=>{
+  const departments=[{name:'동일/부서'},{name:'동일:부서'},{name:'부서 목록'},{name:"'"+'가'.repeat(50)+"'"}],names=departmentSheetNames(departments);
+  assert.equal(new Set(names.map(name=>name.toLocaleLowerCase('ko-KR'))).size,names.length);for(const name of names){assert(name.length<=31);assert.doesNotMatch(name,/[\\/?*:[\]]/);assert(!name.startsWith("'")&&!name.endsWith("'"));}
+  const blank={productCount:1,msdsCount:0,missingCount:1,reviewCount:1,rows:[{productName:'=HYPERLINK("https://evil")',manufacturer:'+SUM(1,1)',supplier:'@cmd',purpose:'-1+2',useLocation:'',storageLocation:'',stockQuantity:null,stockUnit:'',averageUsageQuantity:null,averageUsagePeriod:'',usageUnit:'',revisionDate:'',submissionNumber:'',managed:'확인 필요',specialManaged:'확인 필요',workEnvironment:'확인 필요',specialHealth:'확인 필요',reviewRequired:'예'}]};
+  const entries=readZip(chemicalWorkbook({companyName:'테스트',outputDate:'2026-09-25',departments:departments.map(department=>({...department,...blank}))})),xml=[...entries].filter(([name])=>name.startsWith('xl/worksheets/')).map(([name])=>entryText(entries,name)).join('\n');
+  assert.match(xml,/=HYPERLINK/);assert.match(xml,/\+SUM/);assert.doesNotMatch(xml,/<f(?:\s|>)/);
 });

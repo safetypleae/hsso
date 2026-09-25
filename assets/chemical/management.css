@@ -20,6 +20,8 @@
 .chemical-panel { margin-bottom: 18px; padding: 24px; }
 .chemical-panel h2 { margin: 0; color: #183b4a; font-size: 23px; }
 .chemical-panel-heading { margin-bottom: 18px; }
+.chemical-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.chemical-list-heading > button { flex: 0 0 auto; width: auto; }
 .chemical-panel-heading p,.chemical-panel > p { margin: 7px 0 0; color: #6c8087; font-size: 13px; }
 .chemical-departments { display: grid; gap: 8px; }
 .chemical-departments button { display: grid; grid-template-columns: minmax(110px,1fr) minmax(80px,3fr) 65px minmax(170px,1.3fr); align-items: center; gap: 14px; width: 100%; padding: 10px 12px; border: 1px solid #e1e9ea; border-radius: 8px; color: #34515e; background: #fff; text-align: left; }
@@ -147,6 +149,7 @@
   .chemical-summary { gap: 8px; }
   .chemical-summary button { padding: 13px; }.chemical-summary strong { font-size: 23px; }
   .chemical-management-status,.chemical-form-grid,.chemical-filters,.chemical-facts { grid-template-columns: 1fr; }
+  .chemical-list-heading { align-items: stretch; flex-direction: column; }
   .chemical-product-row { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
   .chemical-product-main { grid-column: 1 / -1; }
   .chemical-product-row > span:last-child { grid-column: 1 / -1; }

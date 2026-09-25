@@ -2,6 +2,7 @@ import { json, errorResponse } from './auth-session.js';
 import { authenticate } from './documents.js';
 import { validateCasRegistryNumber } from '../assets/msds-composition-parser.js';
 import { evaluateRegulatory } from './regulatory-master-v1.js';
+import { chemicalWorkbook, XLSX_MIME } from './chemical-xlsx.js';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const clean = value => value.trim().replace(/\s+/gu, ' ');
@@ -197,6 +198,74 @@ export async function collection({ request,env }) {
     ]);
     return json({ok:true,productId:id,usageId,msdsPresent:false},201);
   } catch(error){return failure(error);}
+}
+
+const regulatoryText = (category,result) => {
+  const state=result.state,base=state === 'REVIEW_REQUIRED' ? '확인 필요'
+    : ['WORK_ENVIRONMENT','SPECIAL_HEALTH'].includes(category)
+      ? state === 'MATCH' ? '대상 유해인자 포함' : '해당 성분 없음'
+      : state === 'MATCH' ? '해당' : '비해당';
+  const evidence=state==='MATCH'?result.matches:state==='REVIEW_REQUIRED'?result.reviews:[],names=[...new Set(evidence.map(item=>item.chemicalName?.trim()).filter(Boolean))];
+  return names.length?`${base}\n(${names.join(', ')})`:base;
+};
+const kstDate = value => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(value);
+const exportFilename = (company,dateValue) => `HSSO_MSDS_관리대장_${String(company).replace(/[\\/:*?"<>|\r\n]/g,'_').slice(0,80)||'회사'}_${dateValue}.xlsx`;
+
+export async function exportWorkbook({request,env}) {
+  const rejected=guard(request,['GET']);if(rejected)return rejected;
+  try{
+    const a=await access(request,env);if(a.response)return a.response;
+    const params=new URL(request.url).searchParams,q=params.get('q')||'',status=params.get('status')||'all',departmentId=params.get('departmentId')||'';
+    if(!text(q,200)||!['all','with-msds','without-msds','registered','needs-review','ACTIVE','ARCHIVED'].includes(status)||departmentId&&!UUID.test(departmentId))return errorResponse('INVALID_FILTER',400);
+    const company=await env.DB.prepare('SELECT name FROM companies WHERE id=? AND status=?').bind(a.companyId,'active').first();
+    if(!company)return errorResponse('NOT_FOUND',404);
+    const pattern=`%${key(q).replace(/[\\%_]/g,'\\$&')}%`;
+    const rows=await env.DB.prepare(`SELECT p.id AS productId,p.product_name AS productName,p.manufacturer,p.supplier,
+      u.id AS usageId,u.department_id AS departmentId,d.name AS departmentName,u.purpose,u.use_location AS useLocation,u.storage_location AS storageLocation,
+      u.stock_quantity AS stockQuantity,u.stock_unit AS stockUnit,u.average_usage_quantity AS averageUsageQuantity,u.average_usage_period AS averageUsagePeriod,u.usage_unit AS usageUnit,
+      v.id AS currentVersionId,v.revision_date AS revisionDate,v.submission_number AS submissionNumber,
+      CASE WHEN v.id IS NOT NULL AND EXISTS(SELECT 1 FROM chemical_msds_ingredients status_i WHERE status_i.version_id=v.id AND status_i.company_id=p.company_id AND status_i.review_status='AUTO_EXTRACTED') THEN 1 ELSE 0 END AS needsReview
+      FROM chemical_usages u INNER JOIN chemical_products p ON p.id=u.product_id AND p.company_id=u.company_id
+      INNER JOIN company_departments d ON d.id=u.department_id AND d.company_id=u.company_id
+      LEFT JOIN chemical_msds_versions v ON v.product_id=p.id AND v.company_id=p.company_id AND v.is_current=1
+      WHERE p.company_id=? AND (p.product_name_key LIKE ? ESCAPE '\\' OR p.manufacturer_key LIKE ? ESCAPE '\\')
+      AND (?='' OR u.department_id=?)
+      AND (?='all' OR (?='with-msds' AND v.id IS NOT NULL) OR (?='without-msds' AND v.id IS NULL)
+        OR (?='registered' AND v.id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM chemical_msds_ingredients filter_i WHERE filter_i.version_id=v.id AND filter_i.company_id=p.company_id AND filter_i.review_status='AUTO_EXTRACTED'))
+        OR (?='needs-review' AND EXISTS(SELECT 1 FROM chemical_msds_ingredients filter_i WHERE filter_i.version_id=v.id AND filter_i.company_id=p.company_id AND filter_i.review_status='AUTO_EXTRACTED')) OR p.product_status=?)
+      ORDER BY d.name,d.id,p.product_name_key,p.manufacturer_key,u.created_at,u.id`)
+      .bind(a.companyId,pattern,pattern,departmentId,departmentId,status,status,status,status,status,status).all();
+    const selectedProducts=new Set(rows.results.map(row=>row.productId)),ingredientsByVersion=new Map();
+    if(selectedProducts.size){
+      const ingredientRows=await env.DB.prepare(`SELECT i.product_id AS productId,i.version_id AS versionId,${ingredientFields} FROM chemical_msds_ingredients i
+        INNER JOIN chemical_msds_versions v ON v.id=i.version_id AND v.company_id=i.company_id AND v.product_id=i.product_id AND v.is_current=1
+        WHERE i.company_id=? ORDER BY i.version_id,i.sort_order,i.id`).bind(a.companyId).all();
+      for(const ingredient of ingredientRows.results){if(!selectedProducts.has(ingredient.productId)&&ingredient.productId!==undefined)continue;if(!ingredientsByVersion.has(ingredient.versionId))ingredientsByVersion.set(ingredient.versionId,[]);ingredientsByVersion.get(ingredient.versionId).push(ingredient);}
+    }
+    const regulatoryByProduct=new Map();
+    for(const row of rows.results){if(!regulatoryByProduct.has(row.productId))regulatoryByProduct.set(row.productId,evaluateRegulatory(ingredientsByVersion.get(row.currentVersionId)||[],{versionId:row.currentVersionId}));}
+    const departments=new Map();
+    for(const source of rows.results){
+      const regulatory=regulatoryByProduct.get(source.productId),categories=regulatory.categories;
+      const review=Boolean(source.needsReview)||Object.values(categories).some(value=>value.state==='REVIEW_REQUIRED');
+      if(!departments.has(source.departmentId))departments.set(source.departmentId,{id:source.departmentId,name:source.departmentName,rows:[],products:new Map()});
+      const department=departments.get(source.departmentId);
+      department.rows.push({
+        productName:source.productName,manufacturer:source.manufacturer,supplier:source.supplier,purpose:source.purpose,useLocation:source.useLocation,storageLocation:source.storageLocation,
+        stockQuantity:source.stockQuantity,stockUnit:source.stockUnit,averageUsageQuantity:source.averageUsageQuantity,averageUsagePeriod:source.averageUsagePeriod,usageUnit:source.usageUnit,
+        revisionDate:source.revisionDate||'',submissionNumber:source.submissionNumber||'',managed:regulatoryText('MANAGED',categories.MANAGED),specialManaged:regulatoryText('SPECIAL_MANAGED',categories.SPECIAL_MANAGED),
+        workEnvironment:regulatoryText('WORK_ENVIRONMENT',categories.WORK_ENVIRONMENT),specialHealth:regulatoryText('SPECIAL_HEALTH',categories.SPECIAL_HEALTH),reviewRequired:review?'예':'아니오'
+      });
+      if(!department.products.has(source.productId))department.products.set(source.productId,{msds:Boolean(source.currentVersionId),review});
+      else if(review)department.products.get(source.productId).review=true;
+    }
+    const workbookDepartments=[...departments.values()].map(department=>{
+      const products=[...department.products.values()],msdsCount=products.filter(product=>product.msds).length;
+      return {id:department.id,name:department.name,rows:department.rows,productCount:products.length,msdsCount,missingCount:products.length-msdsCount,reviewCount:products.filter(product=>product.review).length};
+    });
+    const outputDate=kstDate(new Date()),bytes=chemicalWorkbook({companyName:company.name,outputDate,departments:workbookDepartments}),filename=exportFilename(company.name,outputDate);
+    return new Response(bytes,{headers:{'Content-Type':XLSX_MIME,'Content-Length':String(bytes.length),'Content-Disposition':`attachment; filename="hsso-msds-register.xlsx"; filename*=UTF-8''${encodeURIComponent(filename)}`,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
+  }catch(error){return failure(error);}
 }
 async function objectBytes(object){
   if(typeof object.arrayBuffer==='function')return object.arrayBuffer();
