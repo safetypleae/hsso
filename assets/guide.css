@@ -1,0 +1,40 @@
+.guide-header-nav { display: flex; align-items: center; gap: 24px; margin-left: auto; }
+.guide-header-nav a { color: #536274; font-size: 14px; font-weight: 700; }
+.guide-header-nav a:hover, .guide-header-nav a:focus-visible { color: var(--blue); }
+.guide-page { min-height: 70vh; }
+.guide-hero { padding: 64px 0 42px; }
+.guide-breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 28px; color: var(--muted); font-size: 13px; }
+.guide-breadcrumb a:hover, .guide-breadcrumb a:focus-visible { color: var(--blue); }
+.guide-hero .hero-description { max-width: 800px; }
+.guide-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.guide-actions .primary-button, .guide-actions .secondary-button { width: auto; min-height: 48px; }
+.guide-content { display: grid; gap: 22px; padding-bottom: 72px; }
+.guide-section { padding: 34px; border: 1px solid #e2e9ed; border-radius: var(--radius); background: var(--white); box-shadow: var(--shadow); }
+.guide-section h2 { margin-bottom: 14px; color: var(--navy); font-size: 24px; letter-spacing: -.6px; }
+.guide-section p { margin-bottom: 12px; color: var(--muted); }
+.guide-section p:last-child { margin-bottom: 0; }
+.guide-section ul { display: grid; gap: 9px; margin: 0; padding-left: 22px; color: #445667; }
+.guide-notice { display: flex; max-width: none; margin: 0; }
+.guide-related { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.guide-related a { display: block; padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: #fff; transition: border-color .2s, transform .2s; }
+.guide-related a:hover, .guide-related a:focus-visible { border-color: var(--blue); transform: translateY(-2px); }
+.guide-related h3 { margin-bottom: 7px; color: var(--navy); font-size: 17px; }
+.guide-related p { margin: 0; font-size: 13px; }
+.guide-final-cta { display: flex; align-items: center; justify-content: space-between; gap: 28px; background: #eef7f8; }
+.guide-final-cta h2 { margin-bottom: 7px; }
+.guide-final-cta .primary-button { flex: 0 0 auto; width: auto; }
+.guide-page + .site-footer .section-shell { display: flex; }
+@media (max-width: 760px) {
+  .guide-header-nav { gap: 14px; }
+  .guide-header-nav a:first-child { display: none; }
+  .guide-hero { padding: 42px 0 30px; }
+  .guide-content { padding-bottom: 48px; }
+  .guide-section { padding: 24px; }
+  .guide-related { grid-template-columns: 1fr; }
+  .guide-final-cta { align-items: flex-start; flex-direction: column; }
+  .guide-final-cta .primary-button { width: 100%; }
+}
+@media (max-width: 480px) {
+  .guide-header-nav a { font-size: 12px; }
+  .guide-hero h1 { font-size: 34px; }
+}
