@@ -24,7 +24,40 @@
 .board-detail { padding: 30px; border-top: 2px solid var(--navy); background: #fff; }
 .board-detail h1 { margin-bottom: 16px; font-size: 29px; }
 .board-meta { display: flex; flex-wrap: wrap; gap: 8px 22px; padding-bottom: 20px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
-.board-body { min-height: 220px; padding: 28px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.board-body { min-height: 220px; padding: 28px 0; overflow-wrap: anywhere; }
+.board-format-plain { white-space: pre-wrap; }
+.board-rich-content { display: grid; gap: 10px; font-size: 16px; line-height: 1.75; }
+.board-rich-content p, .board-rich-content ul, .board-rich-content ol { margin: 0; }
+.board-rich-content p, .board-rich-content li { white-space: pre-wrap; }
+.board-rich-content ul, .board-rich-content ol { padding-left: 25px; }
+.board-rich-content a { color: var(--blue); text-decoration: underline; text-underline-offset: 3px; }
+.board-rich-align-left { text-align: left; }
+.board-rich-align-center { text-align: center; }
+.board-rich-align-right { text-align: right; }
+.board-rich-size-12px { font-size: 12px; }
+.board-rich-size-14px { font-size: 14px; }
+.board-rich-size-16px { font-size: 16px; }
+.board-rich-size-18px { font-size: 18px; }
+.board-rich-size-20px { font-size: 20px; }
+.board-rich-size-24px { font-size: 24px; }
+.board-rich-size-28px { font-size: 28px; }
+.board-rich-size-32px { font-size: 32px; }
+.board-rich-editor { display: grid; gap: 8px; min-width: 0; }
+.board-rich-toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; max-width: 100%; padding: 7px; overflow-x: auto; border: 1px solid #cbd6da; border-bottom: 0; border-radius: 5px 5px 0 0; background: #f5f8f9; scrollbar-width: thin; }
+.board-rich-toolbar button, .board-rich-toolbar select { flex: 0 0 auto; min-height: 34px; padding: 5px 9px; border: 1px solid #c8d4d8; border-radius: 3px; background: #fff; color: #294252; font: inherit; font-size: 12px; }
+.board-rich-toolbar button { font-weight: 700; }
+.board-rich-toolbar .is-bold { font-weight: 900; }
+.board-rich-toolbar .is-italic { font-style: italic; }
+.board-rich-toolbar .is-underline { text-decoration: underline; }
+.board-rich-toolbar .is-strike { text-decoration: line-through; }
+.board-rich-toolbar .is-center { text-align: center; }
+.board-rich-toolbar .is-right { text-align: right; }
+.board-form .board-rich-toolbar .board-rich-link-input { flex: 0 0 128px; width: 128px; min-height: 34px; padding: 5px 8px; border-radius: 3px; font-size: 12px; }
+.board-rich-input { min-height: 300px; padding: 14px; overflow-wrap: anywhere; border: 1px solid #cbd6da; border-radius: 0 0 5px 5px; background: #fff; font-size: 16px; line-height: 1.7; outline: 0; white-space: pre-wrap; }
+.board-rich-input:focus { border-color: var(--green); box-shadow: 0 0 0 2px rgba(28, 119, 107, .12); }
+.board-rich-input p, .board-rich-input ul, .board-rich-input ol { margin: 0 0 10px; }
+.board-rich-input ul, .board-rich-input ol { padding-left: 25px; }
+.board-rich-message { min-height: 18px; margin: 0; color: var(--muted); font-size: 12px; }
 .board-actions { display: flex; gap: 8px; border-top: 1px solid var(--line); padding-top: 18px; }
 .board-form { display: grid; gap: 18px; padding: 28px; border-top: 2px solid var(--navy); background: #fff; }
 .board-form label { display: grid; gap: 7px; color: var(--navy); font-size: 14px; font-weight: 650; }
@@ -37,9 +70,9 @@
 .board-filter select { min-height: 44px; padding: 8px; border: 1px solid #cad6db; background: #fff; color: var(--navy); }
 .board-answer { margin-bottom: 24px; padding: 20px; border-left: 3px solid var(--green); background: #f5f9f8; }
 .board-answer h2 { font-size: 18px; }
-.board-answer-content { white-space: pre-wrap; overflow-wrap: anywhere; }
+.board-answer-content { margin-block: 12px; overflow-wrap: anywhere; }
 .board-answer-form { margin-bottom: 24px; }
-.board-answer-form textarea { min-height: 160px; }
+.board-answer-form .board-rich-input { min-height: 160px; }
 @media (max-width: 760px) {
   .board-page { grid-template-columns: minmax(0,1fr); gap: 22px; padding-block: 24px 50px; }
   .board-sidebar { padding: 0 0 15px; border-right: 0; border-bottom: 1px solid var(--line); }

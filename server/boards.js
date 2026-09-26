@@ -1,6 +1,7 @@
 import { json, errorResponse } from './auth-session.js';
 import { authenticate } from './documents.js';
 import { requireAdmin, userRole } from './admin-auth.js';
+import { sanitizeStoredBoardContent } from '../assets/board-format.js';
 
 export const MAX_BOARD_BODY_BYTES = 65536;
 const UUID = /^[a-f0-9-]{36}$/;
@@ -40,12 +41,13 @@ export async function boardCollection({ request, env }) {
     if (request.method === 'POST') {
       const userId = await authenticate(request, env); if (!userId) return errorResponse('UNAUTHENTICATED', 401);
       let input; try { input = await readBody(request); } catch (error) { return bodyError(error); }
-      if (!object(input) || !['notice','free'].includes(input.boardType) || !text(input.title, 200, true) || !text(input.content, 10000, true)) return errorResponse('INVALID_POST', 400);
+      const content = object(input) ? sanitizeStoredBoardContent(input.content) : null;
+      if (!object(input) || !['notice','free'].includes(input.boardType) || !text(input.title, 200, true) || !content) return errorResponse('INVALID_POST', 400);
       if (input.boardType === 'notice') {
         const admin = await requireAdmin(request, env); if (admin.response) return admin.response;
       }
       const id = crypto.randomUUID(), now = new Date().toISOString();
-      const result = await env.DB.prepare('INSERT INTO board_posts (id,board_type,author_user_id,title,content,view_count,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)').bind(id,input.boardType,userId,input.title.trim(),input.content.trim(),now,now).run();
+      const result = await env.DB.prepare('INSERT INTO board_posts (id,board_type,author_user_id,title,content,view_count,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)').bind(id,input.boardType,userId,input.title.trim(),content,now,now).run();
       if (!result.success || result.meta?.changes !== 1) throw new Error('insert');
       return json({ ok:true, post:{ id,boardType:input.boardType,title:input.title.trim(),viewCount:0,createdAt:now,updatedAt:now } },201);
     }
@@ -84,10 +86,10 @@ export async function boardItem({ request, env, params }) {
     if (request.method === 'PATCH') {
       if (existing.boardType === 'free' && existing.authorUserId !== viewerId) return errorResponse('NOT_FOUND',404);
       let input;try{input=await readBody(request);}catch(error){return bodyError(error);}
-      if(!object(input)||!text(input.title,200,true)||!text(input.content,10000,true))return errorResponse('INVALID_POST',400);
+      const content=object(input)?sanitizeStoredBoardContent(input.content):null;if(!object(input)||!text(input.title,200,true)||!content)return errorResponse('INVALID_POST',400);
       const result = existing.boardType === 'notice'
-        ? await env.DB.prepare("UPDATE board_posts SET title=?,content=?,updated_at=? WHERE id=? AND board_type='notice'").bind(input.title.trim(),input.content.trim(),new Date().toISOString(),params.id).run()
-        : await env.DB.prepare("UPDATE board_posts SET title=?,content=?,updated_at=? WHERE id=? AND board_type='free' AND author_user_id=?").bind(input.title.trim(),input.content.trim(),new Date().toISOString(),params.id,viewerId).run();
+        ? await env.DB.prepare("UPDATE board_posts SET title=?,content=?,updated_at=? WHERE id=? AND board_type='notice'").bind(input.title.trim(),content,new Date().toISOString(),params.id).run()
+        : await env.DB.prepare("UPDATE board_posts SET title=?,content=?,updated_at=? WHERE id=? AND board_type='free' AND author_user_id=?").bind(input.title.trim(),content,new Date().toISOString(),params.id,viewerId).run();
       if(!result.success)throw new Error('update');if(result.meta?.changes!==1)return errorResponse('NOT_FOUND',404);
     } else {
       const updated=await env.DB.prepare('UPDATE board_posts SET view_count=view_count+1 WHERE id=?').bind(params.id).run();

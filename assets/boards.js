@@ -1,3 +1,5 @@
+import { createBoardRichEditor, renderBoardContent } from './board-format.js';
+
 const root=document.querySelector('#boards'),content=document.querySelector('#board-content'),status=document.querySelector('#board-status');
 const labels={notice:'공지사항',free:'자유게시판',inquiry:'문의사항'},inquiryStatuses={waiting:'답변 대기',answered:'답변 완료'};
 let boardType='notice',offset=0,query='',currentUser=null,generation=0,manageInquiries=false,inquiryFilter='';
@@ -50,9 +52,9 @@ async function detail(id) {
     const article=el('article','','board-detail'),item=boardType==='inquiry'?data.inquiry:data.post;
     article.append(el('h1',item.title));
     const meta=el('div','','board-meta'),values=boardType==='inquiry'?[labels.inquiry,inquiryStatuses[item.status]||item.status,...(item.authorName?[item.authorName]:[]),date(item.createdAt)]:[labels[item.boardType],item.authorName,date(item.createdAt),`조회 ${item.viewCount}`];
-    for(const value of values)meta.append(el('span',value));article.append(meta,el('div',item.content,'board-body'));
+    for(const value of values)meta.append(el('span',value));const body=el('div','','board-body');body.append(renderBoardContent(item.content));article.append(meta,body);
     if(boardType==='inquiry') {
-      if(item.answer){const answer=el('section','','board-answer');answer.append(el('h2','관리자 답변'),el('p',item.answer.content,'board-answer-content'),el('small',`최종 수정 ${date(item.answer.updatedAt)}`));article.append(answer);}
+      if(item.answer){const answer=el('section','','board-answer'),answerContent=renderBoardContent(item.answer.content);answerContent.classList.add('board-answer-content');answer.append(el('h2','관리자 답변'),answerContent,el('small',`최종 수정 ${date(item.answer.updatedAt)}`));article.append(answer);}
       if(manageInquiries&&isAdmin())article.append(answerForm(item));
     }
     const actions=el('div','','board-actions');actions.append(button('목록으로',list));
@@ -68,17 +70,16 @@ async function detail(id) {
 }
 
 function answerForm(item) {
-  const version=generation,form=el('form','','board-form board-answer-form'),label=el('label',item.answer?'답변 수정':'답변 작성'),input=document.createElement('textarea');
-  input.name='answer';input.required=true;input.maxLength=10000;input.value=item.answer?.content||'';label.append(input);
+  const version=generation,form=el('form','','board-form board-answer-form'),label=el('label',item.answer?'답변 수정':'답변 작성'),editor=createBoardRichEditor(item.answer?.content||'');
   const message=el('p','','board-form-message');message.setAttribute('role','status');
-  const submit=el('button',item.answer?'답변 수정':'답변 등록','board-submit');submit.type='submit';form.append(label,message,submit);
+  const submit=el('button',item.answer?'답변 수정':'답변 등록','board-submit');submit.type='submit';form.append(label,editor.element,message,submit);
   form.addEventListener('submit',async event=>{
-    event.preventDefault();submit.disabled=true;message.textContent='저장하는 중입니다.';
-    try{await api(`/api/admin/inquiries/${encodeURIComponent(item.id)}/answer`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:input.value})});if(version===generation)detail(item.id);}
+    event.preventDefault();if(editor.isEmpty()){message.textContent='답변 내용을 입력해주세요.';editor.focus();return;}submit.disabled=true;message.textContent='저장하는 중입니다.';
+    try{await api(`/api/admin/inquiries/${encodeURIComponent(item.id)}/answer`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:editor.serialize()})});if(version===generation)detail(item.id);}
     catch(error){message.textContent=error.status===403?'관리자 권한이 필요합니다.':'답변을 저장하지 못했습니다.';submit.disabled=false;}
   });return form;
 }
-function write(post=null){content.replaceChildren();heading(false);const form=el('form','','board-form'),titleLabel=el('label','제목'),title=document.createElement('input');title.name='title';title.maxLength=200;title.required=true;title.value=post?.title||'';titleLabel.append(title);const contentLabel=el('label','내용'),body=document.createElement('textarea');body.name='content';body.maxLength=10000;body.required=true;body.value=post?.content||'';contentLabel.append(body);const message=el('p','','board-form-message');message.setAttribute('role','status');const actions=el('div','','board-actions'),cancel=button('취소',()=>post?detail(post.id):list()),submit=el('button',post?'수정 완료':boardType==='inquiry'?'문의 등록':'등록','board-submit');submit.type='submit';actions.append(cancel,submit);form.append(titleLabel,contentLabel,message,actions);form.addEventListener('submit',async event=>{event.preventDefault();submit.disabled=true;message.textContent='저장하는 중입니다.';try{const isInquiry=boardType==='inquiry',path=isInquiry?'/api/inquiries':post?`/api/boards/${encodeURIComponent(post.id)}`:'/api/boards',payload=isInquiry?{title:title.value,content:body.value}:{boardType:post?.boardType||boardType,title:title.value,content:body.value},data=await api(path,{method:post?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!isInquiry)window.dispatchEvent(new Event('hsso:boards-changed'));offset=0;query='';detail(isInquiry?data.inquiry.id:data.post.id);}catch(error){message.textContent=error.status===401?'로그인이 필요합니다.':'저장하지 못했습니다.';submit.disabled=false;}});content.append(form);title.focus();}
+function write(post=null){content.replaceChildren();heading(false);const form=el('form','','board-form'),titleLabel=el('label','제목'),title=document.createElement('input');title.name='title';title.maxLength=200;title.required=true;title.value=post?.title||'';titleLabel.append(title);const contentLabel=el('label','내용'),editor=createBoardRichEditor(post?.content||''),message=el('p','','board-form-message');message.setAttribute('role','status');const actions=el('div','','board-actions'),cancel=button('취소',()=>post?detail(post.id):list()),submit=el('button',post?'수정 완료':boardType==='inquiry'?'문의 등록':'등록','board-submit');submit.type='submit';actions.append(cancel,submit);form.append(titleLabel,contentLabel,editor.element,message,actions);form.addEventListener('submit',async event=>{event.preventDefault();if(editor.isEmpty()){message.textContent='내용을 입력해주세요.';editor.focus();return;}submit.disabled=true;message.textContent='저장하는 중입니다.';try{const isInquiry=boardType==='inquiry',path=isInquiry?'/api/inquiries':post?`/api/boards/${encodeURIComponent(post.id)}`:'/api/boards',payload=isInquiry?{title:title.value,content:editor.serialize()}:{boardType:post?.boardType||boardType,title:title.value,content:editor.serialize()},data=await api(path,{method:post?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(!isInquiry)window.dispatchEvent(new Event('hsso:boards-changed'));offset=0;query='';detail(isInquiry?data.inquiry.id:data.post.id);}catch(error){message.textContent=error.status===401?'로그인이 필요합니다.':'저장하지 못했습니다.';submit.disabled=false;}});content.append(form);title.focus();}
 
 root.querySelectorAll('[data-board-select]').forEach(node=>node.addEventListener('click',()=>{boardType=node.dataset.boardSelect;offset=0;query='';list();}));
 document.addEventListener('click',event=>{const link=event.target.closest('[data-board-open], [data-inquiry-open]');if(!link)return;boardType=link.hasAttribute('data-inquiry-open')?'inquiry':link.dataset.boardOpen;offset=0;query='';setTimeout(list,0);},true);

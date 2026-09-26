@@ -7,6 +7,7 @@ import { requireAdmin } from '../server/admin-auth.js';
 import { onRequest as me } from '../functions/api/auth/me.js';
 import { boardCollection, boardItem } from '../server/boards.js';
 import { inquiryCollection, inquiryItem, adminInquiryCollection, adminInquiryItem, adminInquiryAnswer } from '../server/inquiries.js';
+import { BOARD_RICH_MARKER, parseRichStorage } from '../assets/board-format.js';
 
 const origin='https://local.example';
 function request(path, {cookie,method='GET',data,requestOrigin=origin}={}) {
@@ -94,6 +95,15 @@ test('admin creates notice using only the session author',async t=>{
   assert.equal(result.status,201);assert.equal(result.data.post.boardType,'notice');
   assert.equal(db.sqlite.prepare('SELECT author_user_id FROM board_posts WHERE id=?').get(result.data.post.id).author_user_id,admin.id);
 });
+test('admin notice create and update sanitize rich document data',async t=>{
+  const {db,admin}=await fixture(t),source=`${BOARD_RICH_MARKER}\n${JSON.stringify({version:1,blocks:[{type:'paragraph',align:'center',runs:[{text:'본문',bold:true,href:'javascript:alert(1)'}]}]})}`;
+  const created=await call(boardCollection,db,{cookie:admin.cookie,method:'POST',data:{boardType:'notice',title:'서식 공지',content:source}});
+  assert.equal(created.status,201);const id=created.data.post.id;
+  assert.deepEqual(parseRichStorage((await call(boardItem,db,{id,cookie:admin.cookie})).data.post.content).blocks[0].runs,[{text:'본문',bold:true}]);
+  const updated=`${BOARD_RICH_MARKER}\n${JSON.stringify({version:1,blocks:[{type:'ul',align:'left',items:[[{text:'확인',underline:true}]]}]})}`;
+  assert.equal((await call(boardItem,db,{id,cookie:admin.cookie,method:'PATCH',data:{title:'서식 공지 수정',content:updated}})).status,200);
+  assert.equal(parseRichStorage((await call(boardItem,db,{id,cookie:admin.cookie})).data.post.content).blocks[0].type,'ul');
+});
 test('admin patches a notice and client cannot change board type',async t=>{
   const {db,admin}=await fixture(t),id=await createNotice(db,admin);
   const result=await call(boardItem,db,{id,cookie:admin.cookie,method:'PATCH',data:{title:'Updated',content:'New',boardType:'free'}});
@@ -140,12 +150,13 @@ test('admin reads inquiries across owners with status filtering and pagination',
 });
 test('admin answer is stored with trusted author and changes status to answered',async t=>{
   const {db,admin,owner,id}=await fixture(t);
-  const result=await call(adminInquiryAnswer,db,{id,cookie:admin.cookie,method:'PUT',data:{content:'Answer',admin_user_id:owner.id,inquiry_id:crypto.randomUUID()}});
-  assert.equal(result.status,200);assert.equal(result.data.answer.content,'Answer');
+  const source=`${BOARD_RICH_MARKER}\n${JSON.stringify({version:1,blocks:[{type:'paragraph',align:'left',runs:[{text:'Answer',italic:true,href:'javascript:alert(1)',onclick:'x'}]}]})}`;
+  const result=await call(adminInquiryAnswer,db,{id,cookie:admin.cookie,method:'PUT',data:{content:source,admin_user_id:owner.id,inquiry_id:crypto.randomUUID()}});
+  assert.equal(result.status,200);assert.deepEqual(parseRichStorage(result.data.answer.content).blocks[0].runs,[{text:'Answer',italic:true}]);
   const row=db.sqlite.prepare('SELECT * FROM inquiry_answers WHERE inquiry_id=?').get(id);assert.equal(row.admin_user_id,admin.id);
   assert.equal(db.sqlite.prepare('SELECT status FROM inquiry_posts WHERE id=?').get(id).status,'answered');
   assert.equal((await call(adminInquiryCollection,db,{cookie:admin.cookie,path:'/api/admin/inquiries?status=answered'})).data.total,1);
-  const own=await call(inquiryItem,db,{id,cookie:owner.cookie});assert.equal(own.data.inquiry.answer.content,'Answer');
+  const own=await call(inquiryItem,db,{id,cookie:owner.cookie});assert.deepEqual(parseRichStorage(own.data.inquiry.answer.content).blocks[0].runs,[{text:'Answer',italic:true}]);
 });
 test('answer editing keeps one row and preserves creation identity',async t=>{
   const {db,admin,id}=await fixture(t);
