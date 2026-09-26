@@ -91,6 +91,9 @@ test('public guides have unique indexable metadata, headings, CTAs, and internal
     assert.match(html, new RegExp(`<h1>${guide.heading}</h1>`));
     assert.match(html, new RegExp(`href="${guide.cta.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
     assert.match(html, /href="\/"/);
+    assert.match(html, /<section class="guide-section guide-howto"[^>]+aria-labelledby="[^"]+">/);
+    assert.match(html, /<h2 id="[^"]+-howto-title">HSSO 사용방법<\/h2>/);
+    assert.ok((html.match(/class="guide-step"/g) || []).length >= 3, `${guide.slug} needs at least three steps`);
     assert.doesNotMatch(html, /(?:og:image|twitter:image)/);
 
     for (const related of guidePages.filter(({ slug }) => slug !== guide.slug)) {
@@ -113,6 +116,7 @@ test('homepage links to every public guide and guide layout includes mobile rule
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /\.guide-related \{ grid-template-columns: 1fr; \}/);
   assert.match(styles, /\.guide-final-cta \{ align-items: flex-start; flex-direction: column; \}/);
+  assert.match(styles, /\.guide-steps \{ grid-template-columns: 1fr; \}/);
 });
 
 test('Pages keeps public surveys functional but marks them noindex', async () => {

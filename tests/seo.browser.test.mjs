@@ -30,6 +30,7 @@ test('public guides remain readable without horizontal overflow on desktop and m
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
+  for (const slug of guides) assert.equal((await fetch(`${base}/guide/${slug}/`)).status, 200, `${slug} should return 200`);
   const profile = await mkdtemp(join(tmpdir(), 'hsso-seo-'));
   const chrome = spawn(browserPath, ['--headless=new', '--disable-gpu', '--no-first-run', '--disable-background-networking', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   t.after(async () => {
@@ -81,6 +82,8 @@ test('public guides remain readable without horizontal overflow on desktop and m
         h1: document.querySelector('h1')?.getBoundingClientRect().height > 0,
         cta: document.querySelector('.guide-actions .primary-button')?.getBoundingClientRect().height >= 44,
         related: document.querySelectorAll('.guide-related a').length,
+        steps: document.querySelectorAll('.guide-howto .guide-step').length,
+        stepColumns: getComputedStyle(document.querySelector('.guide-steps')).gridTemplateColumns.split(' ').length,
         columns: getComputedStyle(document.querySelector('.guide-related')).gridTemplateColumns.split(' ').length,
         direction: getComputedStyle(document.querySelector('.guide-final-cta')).flexDirection,
         footer: document.querySelector('.site-footer')?.getBoundingClientRect().height > 0
@@ -90,6 +93,8 @@ test('public guides remain readable without horizontal overflow on desktop and m
       assert.equal(layout.h1, true);
       assert.equal(layout.cta, true);
       assert.equal(layout.related, 3);
+      assert.ok(layout.steps >= 3);
+      assert.equal(layout.stepColumns, width < 500 ? 1 : 3);
       assert.equal(layout.columns, width < 500 ? 1 : 3);
       assert.equal(layout.direction, width < 500 ? 'column' : 'row');
       assert.equal(layout.footer, true);
